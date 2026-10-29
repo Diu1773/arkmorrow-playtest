@@ -6,6 +6,8 @@ import { icon } from './icons.js';
 import { prepareShipFrames } from './pixel-art.js';
 import * as cosmos from './cosmos.js';
 import { AudioEngine } from './audio.js';
+import { BUILD_LABEL } from './build-info.js';
+import { FrameStats, browserName, playtestRecord } from './playtest.js';
 import { DEV } from './env.js';
 import { TRACKS, SFX_IDS } from './audio-score.js';
 import { fillStress } from './dev-scenes.js';
@@ -19,7 +21,7 @@ catch {
 }
 const parsed = parseSave(storageRaw);
 let save = parsed.save, view = 'title', sim = null, selectedSector = 0, difficulty = 'normal', offers = [], chest = false, banishing = false, returnView = 'title', shopReturn = 'title', preview = false;
-const keys = new Set(), pointer = { down: false, aim: false, x: 0, y: 0 }, joy = { x: 0, y: 0, id: -1 }, audio = new AudioEngine(save.settings);
+const keys = new Set(), pointer = { down: false, aim: false, x: 0, y: 0 }, joy = { x: 0, y: 0, id: -1, originX: 0, originY: 0 }, audio = new AudioEngine(save.settings);
 let lastEvolved = 'pulse', selectedMeta = 'output';
 let hangarIndex = -1, resultAt = 0, stressPreview = false, chestUntil = 0, effectsTransparency = .25, largeProjectiles = true;
 try {
@@ -33,6 +35,20 @@ try {
 }
 catch { /* A missing visual preference uses the readable default. */ }
 let dashPressed = false, toastUntil = 0, stamp = 0, acc = 0, hudTime = 0, hadPad = false, padBefore = [], padMoveAt = 0, evolveUntil = 0, fps = 60, showPerf = false, frames = 0, fpsAt = 0;
+let quality = 'auto';
+const frameStats = new FrameStats();
+try {
+    showPerf = localStorage.getItem('cosmos-survivor.fps.v1') === '1';
+    const q = localStorage.getItem('cosmos-survivor.quality.v1');
+    if (q === 'auto' || q === 'high' || q === 'low')
+        quality = q;
+}
+catch { }
+function visualPreference(key, value) { if (!preview)
+    try {
+        localStorage.setItem('cosmos-survivor.' + key + '.v1', value);
+    }
+    catch { } }
 const V = { w: window.innerWidth, h: window.innerHeight, dpr: 1, scale: 1, camX: 2400, camY: 1600, time: 0, shake: 0, images: {} };
 const tr = (key) => t(key, save.settings.lang), dict = () => text(save.settings.lang);
 const esc = (s) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -53,7 +69,7 @@ function persist() { if (preview || parsed.future || storageReadFailed)
 catch {
     toast(tr('saveWarning'));
 } }
-function resetInput() { keys.clear(); pointer.down = pointer.aim = false; joy.x = joy.y = 0; joy.id = -1; dashPressed = false; acc = 0; }
+function resetInput() { frameStats.break(); const stick = document.getElementById('joystick'); stick?.classList.remove('active'); stick?.removeAttribute('style'); keys.clear(); pointer.down = pointer.aim = false; joy.x = joy.y = 0; joy.id = -1; dashPressed = false; acc = 0; }
 function focusFirst() { (app.querySelector('[data-autofocus]:not(:disabled)') ?? app.querySelector('button:not(:disabled),select,input'))?.focus({ preventScroll: true }); }
 function visibleEnemies() { return sim?.enemies.reduce((n, e) => n + Number(e.hp > 0 && !e.hidden && Math.abs(e.x - V.camX) < V.w / V.scale / 2 + e.r && Math.abs(e.y - V.camY) < V.h / V.scale / 2 + e.r), 0) ?? 0; }
 function setView(next) { app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim)
@@ -67,7 +83,7 @@ function titleUI() {
  <header class="menu-header"><span class="small-brand">COSMOS</span><div class="header-actions"><span class="wallet">${icon('shards')}<b>${save.shards}</b></span>${btn('shop', tr('shop'))}${btn('settings', tr('settings'), 'quiet')}</div></header>
  <section class="title-stage"><div class="hangar"><div class="title-mark"><h1 class="title-logo"><img src="./assets/pixel/logo.png" width="512" height="144" alt=""><span class="sr-only">COSMOS</span></h1><p>${tr('subtitle')}</p></div><div class="hangar-bay">${btn('ship-prev', '&#9664;', 'hangar-arrow', `aria-label="${tr('previousShip')}"`)}${shipCanvas(selected.id, true)}${btn('ship-next', '&#9654;', 'hangar-arrow', `aria-label="${tr('nextShip')}"`)}</div><div class="hangar-caption"><div><span class="ship-role">${d.shipRoles[si]}</span><h2>${d.shipNames[si]}</h2></div><div class="ship-spec"><span>${tr('hp')} <b>${Math.round(selected.hp + save.meta.hull * 12)}</b></span><span>${tr('move')} <b>${selected.speed}</b></span></div>${locked ? btn('ship', icon('lock') + ' ' + selected.cost, 'unlock-hangar', `data-id="${selected.id}"`) : ''}</div></div>
  <div class="flight-chart panel"><div class="section-title"><h2>${tr('sectorSelect')}</h2></div><div class="starmap"><canvas class="chart-lines" width="240" height="200" aria-hidden="true"></canvas>${SECTORS.map((sector, i) => `<button class="route-card ${selectedSector === i ? 'selected' : ''} ${i > save.unlocked ? 'locked' : ''}" style="--x:${points[i][0]}%;--y:${points[i][1]}%" data-act="sector" data-id="${i}" aria-disabled="${i > save.unlocked}" aria-pressed="${selectedSector === i}"><span class="route-planet"><img src="./assets/pixel/photos/${sector.image.replace('.jpg', '.png')}" width="48" height="48" alt="">${i > save.unlocked ? icon('lock') : ''}</span><b>${d.sectorNames[i]}</b></button>`).join('')}</div><div class="flight-info"><h3>${d.sectorNames[selectedSector]}</h3><span>${tr('minutes')}</span></div><div class="launch-panel"><label><span class="sr-only">${tr('difficulty')}</span><select id="difficulty" aria-label="${tr('difficulty')}">${['easy', 'normal', 'hard'].map(k => `<option value="${k}" ${difficulty === k ? 'selected' : ''}>${tr(k)}</option>`).join('')}</select></label>${btn('start', tr('launch'), 'primary launch', `data-autofocus ${locked ? 'disabled' : ''}`)}</div></div></section>
- <footer class="title-footer"><a href="/CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a></footer></div></main>`;
+ <footer class="title-footer"><small class="build-label">${esc(BUILD_LABEL)}</small> <a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a></footer></div></main>`;
 }
 function drawChart() { const ca = app.querySelector('.chart-lines'); if (!ca)
     return; const c = ca.getContext('2d'), points = [[36, 146], [86, 92], [41, 36], [146, 38], [199, 94], [158, 152]]; c.imageSmoothingEnabled = false; c.clearRect(0, 0, 240, 200); for (let i = 0; i < 70; i++) {
@@ -121,8 +137,8 @@ function choiceChange(c) {
 }
 function choiceUI() { return heading(chest ? tr('chest') : tr('levelup'), banishing ? tr('banishHint') : tr('pick'), false) + `<div class="upgrade-grid">${offers.map((c, i) => { const x = choiceText(c), change = choiceChange(c); return `<button class="upgrade-card ${c.kind === 'evolve' ? 'evolve-card' : c.kind === 'passive' ? 'passive-card' : 'weapon-card'}" data-act="choose" data-id="${i}" style="--order:${i}" ${banishing && !['weapon', 'passive'].includes(c.kind) ? 'disabled' : ''}><div class="card-cap"><span>${x.kind}</span><kbd>${i + 1}</kbd></div><div class="item-portrait">${x.icon}${x.new ? '<b class="new-tag">NEW</b>' : ''}</div><h3>${x.name}</h3>${x.rank ? pips(x.rank) : ''}<p class="card-level">${change.rank}</p><p>${x.desc}</p><p class="upgrade-gain">${change.gain}</p></button>`; }).join('')}</div><div class="button-row">${btn('reroll', tr('reroll') + ` (${sim.rerolls})`, '', sim.rerolls <= 0 ? 'disabled' : '')}${btn('skip-cue', tr('skipCue'), 'quiet')}${btn('banish', tr(banishing ? 'cancel' : 'banish') + ` (${sim.banishes})`, 'quiet', sim.banishes <= 0 ? 'disabled' : '')}</div>`; }
 function shopUI() { const d = dict(), selected = META.find(m => m.id === selectedMeta), mi = META.indexOf(selected), lv = save.meta[selected.id], cost = metaCost(selected.id, lv); return heading(tr('shop')) + `<div class="shop-workbench"><div class="shop-wall"><div class="shop-balance wallet">${icon('shards')}<b>${save.shards}</b></div><div class="shop-grid">${META.map((m, i) => `<button class="shop-card ${selectedMeta === m.id ? 'selected' : ''}" data-act="inspect" data-id="${m.id}" aria-label="${d.metaNames[i]}" aria-pressed="${selectedMeta === m.id}">${icon(m.icon)}${pips(save.meta[m.id])}</button>`).join('')}</div></div><section class="shop-detail"><div class="detail-portrait">${icon(selected.icon)}</div><h3>${d.metaNames[mi]}</h3><p>${d.metaDescriptions[mi]}</p>${pips(lv)}<div class="shop-price">${icon('shards')}<b>${lv >= 5 ? tr('soldOut') : cost}</b></div>${btn('buy', tr('buy'), 'primary', `data-id="${selected.id}" ${lv >= 5 || save.shards < cost ? 'disabled' : ''}`)}</section></div><div class="section-title"><h3>${tr('ships')}</h3></div><div class="shop-ships">${SHIPS.map((ship, i) => `<div class="shop-ship">${shipCanvas(ship.id)}<b>${d.shipNames[i]}</b>${btn('unlock', save.ships.includes(ship.id) ? tr('owned') : icon('shards') + String(ship.cost), 'small', `data-id="${ship.id}" ${save.ships.includes(ship.id) || save.shards < ship.cost ? 'disabled' : ''}`)}</div>`).join('')}</div><div class="button-row">${btn('refund', tr('refund'), 'quiet')}<small>${tr('refundHint')}</small></div>`; }
-function settingsUI() { return heading(tr('settings')) + `<div class="settings-list">${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${esc(tr('controls'))}</p><p>${esc(tr('pointerHint'))}</p><p>${esc(tr('evolveHint'))}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="/CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
-function resultUI() { const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${d.sectorNames[r.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship">${shipCanvas(save.ship)}</div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && r.sector < 5 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}<div class="button-row">${btn('shop', tr('shop'), 'primary', 'data-autofocus')}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'quiet')}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
+function settingsUI() { return heading(tr('settings')) + `<div class="settings-list">${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${esc(tr('controls'))}</p><p>${esc(tr('pointerHint'))}</p><p>${esc(tr('evolveHint'))}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
+function resultUI() { const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${d.sectorNames[r.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship">${shipCanvas(save.ship)}</div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && r.sector < 5 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}<div class="button-row">${btn('shop', tr('shop'), 'primary', 'data-autofocus')}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'quiet')}${btn('copy-record', tr('copyRecord'))}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
 function animateResults(now) { if (view !== 'result')
     return; for (const el of app.querySelectorAll('[data-tally]')) {
     const n = Number(el.dataset.tally), f = save.settings.reduced ? 1 : clamp((now - resultAt) / 1000 - Number(el.dataset.delay), 0, 1), value = Math.round(n * (1 - (1 - f) ** 3));
@@ -136,6 +152,7 @@ function aimDust() { if (view !== 'result')
 } }
 function soundUI() { return heading(tr('soundRoom')) + `<p>${tr('soundHint')}</p><div class="sound-tracks">${TRACKS.map((track, i) => `<div><b>${dict().trackNames[i]}</b>${[1, 2, 3].map(level => btn('sound-track', tr('intensity') + ' ' + level, 'small', `data-id="${track.id}:${level}"`)).join('')}</div>`).join('')}</div><div class="sound-effects">${SFX_IDS.map((id, i) => btn('sound-fx', dict().soundNames[i], 'small', `data-id="${id}"`)).join('')}</div><div class="button-row">${btn('sound-stop', tr('stopSound'))}${btn('settings', tr('settings'))}</div>`; }
 function drawUI() {
+    document.documentElement.classList.toggle('in-combat', view === 'playing');
     document.documentElement.lang = save.settings.lang;
     document.documentElement.classList.toggle('motion-reduced', save.settings.reduced);
     document.title = tr('title') + ' - ' + tr('subtitle');
@@ -181,7 +198,7 @@ function drawUI() {
     focusFirst();
 }
 function start() { if (selectedSector > save.unlocked || (hangarIndex >= 0 && !save.ships.includes(SHIPS[hangarIndex].id)))
-    return; audio.unlock(); audio.ui('start'); sim = new Simulation(save.ship, save.meta, Date.now(), undefined, selectedSector, difficulty); V.camX = sim.player.x; V.camY = sim.player.y; setView('playing'); }
+    return; audio.unlock(); audio.ui('start'); frameStats.reset(); sim = new Simulation(save.ship, save.meta, Date.now(), undefined, selectedSector, difficulty); V.camX = sim.player.x; V.camY = sim.player.y; setView('playing'); }
 function openChoice() { if (!sim || sim.status !== 'playing')
     return; if (!sim.pendingLevels && !sim.pendingChests) {
     setView('playing');
@@ -212,7 +229,37 @@ else
     openChoice(); }
 function finish() { if (!sim)
     return; save = settle(save, sim.result()); persist(); audio.play(sim.status === 'won' ? 'clear' : 'down'); setView('result'); }
+async function copyRecord() { if (!sim)
+    return; const record = playtestRecord(sim, frameStats, { width: V.w, height: V.h, touch: navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches, browser: browserName(navigator.userAgent) }, quality, frameStats.autoLow); try {
+    if (!navigator.clipboard?.writeText)
+        throw Error('Clipboard unavailable');
+    await navigator.clipboard.writeText(record);
+    toast(tr('recordCopied'));
+}
+catch {
+    if (view !== 'result')
+        return;
+    let box = document.querySelector('#playtest-record');
+    if (!box) {
+        const label = document.createElement('label');
+        label.className = 'record-fallback';
+        label.textContent = tr('recordFallback');
+        box = document.createElement('textarea');
+        box.id = 'playtest-record';
+        box.readOnly = true;
+        box.rows = 12;
+        label.append(box);
+        document.querySelector('#dialog')?.append(label);
+    }
+    box.value = record;
+    box.focus();
+    box.select();
+} }
 function action(act, id = '') {
+    if (act === 'copy-record') {
+        void copyRecord();
+        return;
+    }
     if (act === 'sound-track') {
         const [track, level] = id.split(':');
         if (TRACKS.some(t => t.id === track) && [1, 2, 3].includes(Number(level)))
@@ -503,6 +550,12 @@ function advance(dt) { if (!sim || view !== 'playing' || stressPreview)
 } if (sim.pendingLevels || sim.pendingChests)
     openChoice(); }
 function frame(now) {
+    frameStats.observe(now, view === 'playing' && !document.hidden);
+    if (document.hidden) {
+        stamp = now;
+        requestAnimationFrame(frame);
+        return;
+    }
     const delta = Math.min(.05, Math.max(0, (now - stamp) / 1000));
     stamp = now;
     V.time = now / 1000;
@@ -527,11 +580,11 @@ function frame(now) {
     if (scene && !save.settings.numbers) {
         const f = scene.floaters;
         scene.floaters = [];
-        cosmos.render(scene, V, { lang: save.settings.lang, reduced: save.settings.reduced, quality: 'auto', effectsOpacity: 1 - effectsTransparency, largeProjectiles });
+        cosmos.render(scene, V, { lang: save.settings.lang, reduced: save.settings.reduced, quality: quality === 'low' || quality === 'auto' && frameStats.autoLow ? 'low' : 'high', effectsOpacity: 1 - effectsTransparency, largeProjectiles });
         scene.floaters = f;
     }
     else
-        cosmos.render(scene, V, { lang: save.settings.lang, reduced: save.settings.reduced, quality: 'auto', effectsOpacity: 1 - effectsTransparency, largeProjectiles });
+        cosmos.render(scene, V, { lang: save.settings.lang, reduced: save.settings.reduced, quality: quality === 'low' || quality === 'auto' && frameStats.autoLow ? 'low' : 'high', effectsOpacity: 1 - effectsTransparency, largeProjectiles });
     audio.tick();
     animateResults(now);
     if (view === 'playing' && now - hudTime > 100) {
@@ -570,7 +623,16 @@ app.addEventListener('change', e => { const el = e.target; if (el.id === 'diffic
     persist();
     drawUI();
 } });
-app.addEventListener('input', e => { const el = e.target, k = el.dataset.setting; if (el.dataset.setting === 'largeProjectiles') {
+app.addEventListener('input', e => { const el = e.target, k = el.dataset.setting; if (el.dataset.setting === 'fpsDisplay') {
+    showPerf = el.checked;
+    visualPreference('fps', showPerf ? '1' : '0');
+    return;
+} if (el.dataset.setting === 'quality') {
+    quality = ['high', 'low'].includes(el.value) ? el.value : 'auto';
+    frameStats.autoLow = false;
+    visualPreference('quality', quality);
+    return;
+} if (el.dataset.setting === 'largeProjectiles') {
     largeProjectiles = el.checked;
     if (!preview)
         try {
@@ -611,6 +673,7 @@ window.addEventListener('keydown', e => {
     if (e.code === 'F3') {
         e.preventDefault();
         showPerf = !showPerf;
+        visualPreference('fps', showPerf ? '1' : '0');
         return;
     }
     if (e.code === 'Escape' || e.code === 'KeyP') {
@@ -651,27 +714,34 @@ window.addEventListener('keyup', e => keys.delete(e.code));
 window.addEventListener('resize', () => { resize(); aimDust(); });
 window.addEventListener('blur', () => { resetInput(); if (view === 'playing')
     setView('pause'); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) {
+document.addEventListener('visibilitychange', () => { resetInput(); if (document.hidden) {
     if (view === 'playing')
         setView('pause');
     audio.stop();
+    void audio.ctx?.suspend?.().catch(() => { });
 }
-else
+else if (view !== 'pause')
     audio.setScene(view === 'settings' && sim ? 'pause' : view); });
 const canvas = document.querySelector('#world');
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('pointerdown', e => { if (view !== 'playing')
-    return; audio.unlock(); pointer.down = e.button === 2; pointer.aim = e.button === 0; pointer.x = e.clientX; pointer.y = e.clientY; canvas.setPointerCapture?.(e.pointerId); });
-window.addEventListener('pointermove', e => { pointer.x = e.clientX; pointer.y = e.clientY; if (e.pointerId === joy.id) {
-    const el = document.getElementById('joystick'), r = el.getBoundingClientRect(), dx = e.clientX - r.left - r.width / 2, dy = e.clientY - r.top - r.height / 2, d = Math.hypot(dx, dy), scale = Math.min(1, (r.width * .33) / (d || 1));
-    joy.x = dx * scale / (r.width * .33);
-    joy.y = dy * scale / (r.width * .33);
-    document.getElementById('stick').style.transform = `translate(${dx * scale}px,${dy * scale}px)`;
-} });
-app.addEventListener('pointerdown', e => { const el = e.target, stick = el.closest('#joystick'); if (stick) {
+    return; audio.unlock(); if (e.pointerType === 'touch') {
     e.preventDefault();
-    joy.id = e.pointerId;
-    stick.setPointerCapture?.(e.pointerId);
+    if (e.clientX < V.w * .5 && e.clientY > V.h * .5 && !Array.from(document.querySelectorAll('#upgrade-chips,.status-box,.hud-actions,.minimap-wrap,#bossbar')).some(el => { const r = el.getBoundingClientRect(); return r.width > 0 && e.clientX > r.left - 44 && e.clientX < r.right + 44 && e.clientY > r.top - 44 && e.clientY < r.bottom + 44; }))
+        beginJoystick(e);
+    return;
+} pointer.down = e.button === 2; pointer.aim = e.button === 0; pointer.x = e.clientX; pointer.y = e.clientY; canvas.setPointerCapture?.(e.pointerId); });
+window.addEventListener('pointermove', e => { pointer.x = e.clientX; pointer.y = e.clientY; if (e.pointerId === joy.id)
+    moveJoystick(e); });
+function moveJoystick(e) { const el = document.getElementById('joystick'); if (!el)
+    return; const radius = (el.getBoundingClientRect().width || 88) * .33, dx = e.clientX - joy.originX, dy = e.clientY - joy.originY, d = Math.hypot(dx, dy), scale = Math.min(1, radius / (d || 1)); joy.x = dx * scale / radius; joy.y = dy * scale / radius; document.getElementById('stick').style.transform = `translate(${dx * scale}px,${dy * scale}px)`; }
+function beginJoystick(e) { if (joy.id !== -1)
+    return; const el = document.getElementById('joystick'); if (!el)
+    return; joy.id = e.pointerId; joy.originX = e.clientX; joy.originY = e.clientY; el.classList.add('active'); el.style.left = e.clientX + 'px'; el.style.top = e.clientY + 'px'; el.style.bottom = 'auto'; el.style.transform = 'translate(-50%,-50%)'; e.target.setPointerCapture?.(e.pointerId); moveJoystick(e); }
+app.addEventListener('pointerdown', e => { audio.unlock(); if (view !== 'playing')
+    return; const el = e.target; if (el.closest('#joystick')) {
+    e.preventDefault();
+    beginJoystick(e);
 } if (el.closest('#dash-btn')) {
     e.preventDefault();
     dashPressed = true;
@@ -679,6 +749,11 @@ app.addEventListener('pointerdown', e => { const el = e.target, stick = el.close
 function pointerUp(e) { pointer.down = pointer.aim = false; if (e.pointerId === joy.id) {
     joy.id = -1;
     joy.x = joy.y = 0;
+    const base = document.getElementById('joystick');
+    if (base) {
+        base.classList.remove('active');
+        base.removeAttribute('style');
+    }
     const stick = document.getElementById('stick');
     if (stick)
         stick.style.transform = 'translate(0,0)';
@@ -767,7 +842,7 @@ function previewScreen(screen) {
     else
         setView('playing');
 }
-export const dev = DEV ? { get save() { return save; }, get view() { return view; }, get sim() { return sim; }, get offers() { return offers; }, get preview() { return preview; }, setSave(value) { save = value; audio.update(save.settings); }, action, advance, openChoice, choose, previewScreen, drawUI, get fps() { return fps; } } : undefined;
+export const dev = DEV ? { get save() { return save; }, get view() { return view; }, get sim() { return sim; }, get offers() { return offers; }, get preview() { return preview; }, setSave(value) { save = value; audio.update(save.settings); }, action, advance, openChoice, choose, previewScreen, drawUI, get fps() { return fps; }, frameStats, get quality() { return quality; }, get audio() { return audio; } } : undefined;
 if (DEV) {
     const screen = new URLSearchParams(location.search).get('screen');
     if (screen)

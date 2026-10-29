@@ -11,6 +11,7 @@ export class Simulation {
     difficulty;
     random;
     id;
+    lastDamageCause = 'unknown';
     time = 0;
     level = 1;
     xp = 0;
@@ -175,8 +176,8 @@ export class Simulation {
         return;
     } if (this.floaters.length < 24)
         this.floaters.push({ x, y, life: .65, text: String(value), color }); }
-    hurt(raw) { const p = this.player; if (p.invul > 0 || p.dashTime > 0 || this.invincible || this.status !== 'playing')
-        return; const damage = Math.max(1, raw - this.attributes.armor); p.hp = Math.max(0, p.hp - damage); p.invul = this.mode.iframes; p.flash = .18; this.shake = 6; this.hitStop = .045; this.emit('hurt', p.x, p.y, Math.ceil(damage), '#ff746e'); this.damageNumber(p.x, p.y - 30, -Math.ceil(damage), '#ffaca4'); if (p.hp <= 0)
+    hurt(raw, cause = 'unknown') { const p = this.player; if (p.invul > 0 || p.dashTime > 0 || this.invincible || this.status !== 'playing')
+        return; this.lastDamageCause = cause; const damage = Math.max(1, raw - this.attributes.armor); p.hp = Math.max(0, p.hp - damage); p.invul = this.mode.iframes; p.flash = .18; this.shake = 6; this.hitStop = .045; this.emit('hurt', p.x, p.y, Math.ceil(damage), '#ff746e'); this.damageNumber(p.x, p.y - 30, -Math.ceil(damage), '#ffaca4'); if (p.hp <= 0)
         this.status = 'lost'; }
     gainXP(value) { this.xp += value * this.attributes.xp * this.xpBoost; while (this.xp >= xpNeeded(this.level)) {
         this.xp -= xpNeeded(this.level);
@@ -448,7 +449,7 @@ export class Simulation {
         e.x = clamp(e.x + Math.cos(angle) * speed * dt, 25, 4775);
         e.y = clamp(e.y + Math.sin(angle) * speed * dt, 25, 3175);
         if (d < e.r + p.r)
-            this.hurt(e.damage);
+            this.hurt(e.damage, e.type === 'boss' ? 'boss:' + e.bossArt : e.type);
         if (d > 1500 && this.sector !== 4 && e.type !== 'boss' && !e.elite) {
             const ang = this.random() * TAU;
             e.x = clamp(p.x + Math.cos(ang) * 760, 35, 4765);
@@ -545,7 +546,7 @@ export class Simulation {
                 hit = Math.abs(Math.hypot(dx, dy) - rad) < h.width / 2 + p.r && !inGap(h.gaps, h.gapW, Math.atan2(dy, dx));
             }
             if (hit)
-                this.hurt(h.damage);
+                this.hurt(h.damage, 'hazard');
         }
     }
     attack(slot, input) {
@@ -664,7 +665,7 @@ export class Simulation {
             }
             if (enemy) {
                 if (!b.reflected && segmentDistance(this.player.x, this.player.y, ox, oy, b.x, b.y) < this.player.r + b.r) {
-                    this.hurt(b.damage);
+                    this.hurt(b.damage, 'bullet');
                     b.life = 0;
                 }
             }
@@ -958,11 +959,15 @@ export class Simulation {
         }
         if (this.status === 'playing' && this.time >= 600 && this.bossKilled)
             this.status = 'won';
-        if (this.status === 'playing' && this.time >= 660)
+        if (this.status === 'playing' && this.time >= 660) {
+            this.lastDamageCause = 'timeout';
             this.status = 'lost';
+        }
     }
-    end() { if (this.status === 'playing')
-        this.status = 'lost'; }
+    end() { if (this.status === 'playing') {
+        this.lastDamageCause = 'abandon';
+        this.status = 'lost';
+    } }
     result() { return { id: this.id, sector: this.sector, time: this.time, kills: this.kills, won: this.status === 'won', earned: this.stress ? 0 : reward(this.time, this.kills, this.bonus, this.status === 'won'), evolutions: this.evolutions }; }
     setLoadout(weapons, passives) { this.weapons = weapons.slice(0, 6).map(id => ({ id, level: 5, evolved: false, timer: 0 })); this.passives = { ...passives }; this.player.maxHp = this.attributes.maxHp; this.player.hp = this.player.maxHp; }
 }
