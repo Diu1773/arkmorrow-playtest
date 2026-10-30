@@ -1,7 +1,11 @@
 import { BOSS_ENCOUNTERS, META, PASSIVES, SECTORS, SHIPS, WEAPONS } from './data.js';
 import { SAVE_KEY, clamp, deadzone, defaultSave, metaCost, parseSave, purchase, refund, settle, unlockShip, weaponStats, xpNeeded } from './core.js';
 import { Simulation } from './sim.js';
-import { text, t } from './i18n.js';
+import { text, t, equipmentCopy } from './i18n.js';
+import { GEAR, SLOTS, addItem, equip, upgrade, fuse, fuseAll, dismantle } from './equipment.js';
+import { CHAPTERS, ECONOMY, combatPower, powerStatus, pull, testCurrency } from './economy.js';
+import { equipmentUI, chapterUI, itemCard } from './equipment-ui.js';
+import { drawGearIcons } from './equipment-art.js';
 import { icon } from './icons.js';
 import { prepareShipFrames } from './pixel-art.js';
 import * as cosmos from './cosmos.js';
@@ -23,6 +27,7 @@ const parsed = parseSave(storageRaw);
 let save = parsed.save, view = 'title', sim = null, selectedSector = 0, difficulty = 'normal', offers = [], chest = false, banishing = false, returnView = 'title', shopReturn = 'title', preview = false;
 const keys = new Set(), pointer = { down: false, aim: false, x: 0, y: 0 }, joy = { x: 0, y: 0, id: -1, originX: 0, originY: 0 }, audio = new AudioEngine(save.settings);
 let lastEvolved = 'pulse', selectedMeta = 'output';
+let selectedGear = 1, slotFilter = 'all', rankFilter = 'all', gearSort = 'rank', drawnGear = [], previousPower = combatPower(save), powerAt = 0, pullSequence = 0, gearReturn = 'title';
 let hangarIndex = -1, resultAt = 0, stressPreview = false, chestUntil = 0, effectsTransparency = .25, largeProjectiles = true;
 try {
     const raw = localStorage.getItem('cosmos-survivor.effects.v1');
@@ -75,14 +80,14 @@ function visibleEnemies() { return sim?.enemies.reduce((n, e) => n + Number(e.hp
 function setView(next) { app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim)
     audio.combat(sim.sector, sim.time, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0)); drawUI(); }
 function shipCanvas(id, large = false) { return `<canvas class="${large ? 'hero-ship' : 'ship-preview'}" data-ship="${id}" width="${large ? 432 : 96}" height="${large ? 336 : 96}" aria-label="${esc(dict().shipNames[SHIPS.findIndex(s => s.id === id)])}"></canvas>`; }
-function drawShips() { for (const c of app.querySelectorAll('[data-ship]'))
+function drawShips() { drawGearIcons(app, [...save.equipment.items, ...(save.equipment.lastLoot?.items ?? [])]); for (const c of app.querySelectorAll('[data-ship]'))
     cosmos.snapshotShip(c.dataset.ship, c); }
 function titleUI() {
     const d = dict(), si = hangarIndex < 0 ? SHIPS.findIndex(s => s.id === save.ship) : hangarIndex, selected = SHIPS[si], locked = !save.ships.includes(selected.id), points = [[15, 73], [36, 46], [17, 18], [61, 19], [83, 47], [66, 76]];
     return `<main id="menu"><div class="menu-wrap">
- <header class="menu-header"><span class="small-brand">COSMOS</span><div class="header-actions"><span class="wallet">${icon('shards')}<b>${save.shards}</b></span>${btn('shop', tr('shop'))}${btn('settings', tr('settings'), 'quiet')}</div></header>
+ <header class="menu-header"><span class="small-brand">COSMOS</span><div class="header-actions"><span class="wallet">${icon('shards')}<b>${save.shards}</b></span>${btn('gear-view', equipmentCopy(save.settings.lang).equipment, '', 'data-id=equipment')}${btn('shop', tr('shop'))}${btn('settings', tr('settings'), 'quiet')}</div></header>
  <section class="title-stage"><div class="hangar"><div class="title-mark"><h1 class="title-logo"><img src="./assets/pixel/logo.png" width="512" height="144" alt=""><span class="sr-only">COSMOS</span></h1><p>${tr('subtitle')}</p></div><div class="hangar-bay">${btn('ship-prev', '&#9664;', 'hangar-arrow', `aria-label="${tr('previousShip')}"`)}${shipCanvas(selected.id, true)}${btn('ship-next', '&#9654;', 'hangar-arrow', `aria-label="${tr('nextShip')}"`)}</div><div class="hangar-caption"><div><span class="ship-role">${d.shipRoles[si]}</span><h2>${d.shipNames[si]}</h2></div><div class="ship-spec"><span>${tr('hp')} <b>${Math.round(selected.hp + save.meta.hull * 12)}</b></span><span>${tr('move')} <b>${selected.speed}</b></span></div>${locked ? btn('ship', icon('lock') + ' ' + selected.cost, 'unlock-hangar', `data-id="${selected.id}"`) : ''}</div></div>
- <div class="flight-chart panel"><div class="section-title"><h2>${tr('sectorSelect')}</h2></div><div class="starmap"><canvas class="chart-lines" width="240" height="200" aria-hidden="true"></canvas>${SECTORS.map((sector, i) => `<button class="route-card ${selectedSector === i ? 'selected' : ''} ${i > save.unlocked ? 'locked' : ''}" style="--x:${points[i][0]}%;--y:${points[i][1]}%" data-act="sector" data-id="${i}" aria-disabled="${i > save.unlocked}" aria-pressed="${selectedSector === i}"><span class="route-planet"><img src="./assets/pixel/photos/${sector.image.replace('.jpg', '.png')}" width="48" height="48" alt="">${i > save.unlocked ? icon('lock') : ''}</span><b>${d.sectorNames[i]}</b></button>`).join('')}</div><div class="flight-info"><h3>${d.sectorNames[selectedSector]}</h3><span>${tr('minutes')}</span></div><div class="launch-panel"><label><span class="sr-only">${tr('difficulty')}</span><select id="difficulty" aria-label="${tr('difficulty')}">${['easy', 'normal', 'hard'].map(k => `<option value="${k}" ${difficulty === k ? 'selected' : ''}>${tr(k)}</option>`).join('')}</select></label>${btn('start', tr('launch'), 'primary launch', `data-autofocus ${locked ? 'disabled' : ''}`)}</div></div></section>
+ <div class="flight-chart panel"><div class="section-title"><h2>${equipmentCopy(save.settings.lang).chapters}</h2>${btn('chapters', equipmentCopy(save.settings.lang).chapters, 'small')}</div><div class="starmap"><canvas class="chart-lines" width="240" height="200" aria-hidden="true"></canvas>${SECTORS.map((sector, i) => `<button class="route-card ${selectedSector === i ? 'selected' : ''} ${i > save.unlocked ? 'locked' : ''}" style="--x:${points[i][0]}%;--y:${points[i][1]}%" data-act="sector" data-id="${i}" aria-disabled="${i > save.unlocked}" aria-pressed="${selectedSector === i}"><span class="route-planet"><img src="./assets/pixel/photos/${sector.image.replace('.jpg', '.png')}" width="48" height="48" alt="">${i > save.unlocked ? icon('lock') : ''}</span><b>${equipmentCopy(save.settings.lang).chapter} ${i + 1}<br>${d.sectorNames[i]}</b></button>`).join('')}</div><div class="flight-info"><h3>${d.sectorNames[selectedSector]}</h3><span>${tr('minutes')}</span></div><div class="chapter-power">${equipmentCopy(save.settings.lang).mine} <b>${combatPower(save)}</b> / ${CHAPTERS[selectedSector].recommended}<p>${equipmentCopy(save.settings.lang).status[powerStatus(combatPower(save), CHAPTERS[selectedSector].recommended)]}</p><small>${equipmentCopy(save.settings.lang).first}: ${ECONOMY.firstGems} ${equipmentCopy(save.settings.lang).gems} + ${ECONOMY.firstChests} ${equipmentCopy(save.settings.lang).chests}</small></div><div class="launch-panel"><label><span class="sr-only">${tr('difficulty')}</span><select id="difficulty" aria-label="${tr('difficulty')}">${['easy', 'normal', 'hard'].map(k => `<option value="${k}" ${difficulty === k ? 'selected' : ''}>${tr(k)}</option>`).join('')}</select></label>${btn('start', tr('launch'), 'primary launch', `data-autofocus ${locked ? 'disabled' : ''}`)}</div></div></section>
  <footer class="title-footer"><small class="build-label">${esc(BUILD_LABEL)}</small> <a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>${DEV || PLAYTEST ? '<a class="trial-link" href="?scenes">시험 장면</a>' : ''}</footer></div></main>`;
 }
 function drawChart() { const ca = app.querySelector('.chart-lines'); if (!ca)
@@ -137,9 +142,13 @@ function choiceChange(c) {
 }
 function choiceUI() { return heading(chest ? tr('chest') : tr('levelup'), banishing ? tr('banishHint') : tr('pick'), false) + `<div class="upgrade-grid">${offers.map((c, i) => { const x = choiceText(c), change = choiceChange(c); return `<button class="upgrade-card ${c.kind === 'evolve' ? 'evolve-card' : c.kind === 'passive' ? 'passive-card' : 'weapon-card'}" data-act="choose" data-id="${i}" style="--order:${i}" ${banishing && !['weapon', 'passive'].includes(c.kind) ? 'disabled' : ''}><div class="card-cap"><span>${x.kind}</span><kbd>${i + 1}</kbd></div><div class="item-portrait">${x.icon}${x.new ? '<b class="new-tag">NEW</b>' : ''}</div><h3>${x.name}</h3>${x.rank ? pips(x.rank) : ''}<p class="card-level">${change.rank}</p><p>${x.desc}</p><p class="upgrade-gain">${change.gain}</p></button>`; }).join('')}</div><div class="button-row">${btn('reroll', tr('reroll') + ` (${sim.rerolls})`, '', sim.rerolls <= 0 ? 'disabled' : '')}${btn('skip-cue', tr('skipCue'), 'quiet')}${btn('banish', tr(banishing ? 'cancel' : 'banish') + ` (${sim.banishes})`, 'quiet', sim.banishes <= 0 ? 'disabled' : '')}</div>`; }
 function shopUI() { const d = dict(), selected = META.find(m => m.id === selectedMeta), mi = META.indexOf(selected), lv = save.meta[selected.id], cost = metaCost(selected.id, lv); return heading(tr('shop')) + `<div class="shop-workbench"><div class="shop-wall"><div class="shop-balance wallet">${icon('shards')}<b>${save.shards}</b></div><div class="shop-grid">${META.map((m, i) => `<button class="shop-card ${selectedMeta === m.id ? 'selected' : ''}" data-act="inspect" data-id="${m.id}" aria-label="${d.metaNames[i]}" aria-pressed="${selectedMeta === m.id}">${icon(m.icon)}${pips(save.meta[m.id])}</button>`).join('')}</div></div><section class="shop-detail"><div class="detail-portrait">${icon(selected.icon)}</div><h3>${d.metaNames[mi]}</h3><p>${d.metaDescriptions[mi]}</p>${pips(lv)}<div class="shop-price">${icon('shards')}<b>${lv >= 5 ? tr('soldOut') : cost}</b></div>${btn('buy', tr('buy'), 'primary', `data-id="${selected.id}" ${lv >= 5 || save.shards < cost ? 'disabled' : ''}`)}</section></div><div class="section-title"><h3>${tr('ships')}</h3></div><div class="shop-ships">${SHIPS.map((ship, i) => `<div class="shop-ship">${shipCanvas(ship.id)}<b>${d.shipNames[i]}</b>${btn('unlock', save.ships.includes(ship.id) ? tr('owned') : icon('shards') + String(ship.cost), 'small', `data-id="${ship.id}" ${save.ships.includes(ship.id) || save.shards < ship.cost ? 'disabled' : ''}`)}</div>`).join('')}</div><div class="button-row">${btn('refund', tr('refund'), 'quiet')}<small>${tr('refundHint')}</small></div>`; }
-function settingsUI() { return heading(tr('settings')) + `<div class="settings-list">${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${esc(tr('controls'))}</p><p>${esc(tr('pointerHint'))}</p><p>${esc(tr('evolveHint'))}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
-function resultUI() { const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${d.sectorNames[r.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship">${shipCanvas(save.ship)}</div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && r.sector < 5 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}<div class="button-row">${btn('shop', tr('shop'), 'primary', 'data-autofocus')}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'quiet')}${btn('copy-record', tr('copyRecord'))}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
-function animateResults(now) { if (view !== 'result')
+function settingsUI() { return heading(tr('settings')) + `${DEV || PLAYTEST ? `<p class="test-build">${equipmentCopy(save.settings.lang).testBuild}</p>${btn('test-currency', equipmentCopy(save.settings.lang).test)}` : ''}` + `<div class="settings-list">${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${esc(tr('controls'))}</p><p>${esc(tr('pointerHint'))}</p><p>${esc(tr('evolveHint'))}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
+function rewardUI() { const d = equipmentCopy(save.settings.lang), loot = save.equipment.lastLoot, short = Math.max(0, CHAPTERS[sim.sector].recommended - combatPower(save)); return `<section class="equipment-rewards"><h3>${d.reward}</h3>${loot ? `<p>${d.gold} +${loot.gold} / ${d.gems} +${loot.gems} / ${d.chests} ${loot.chests}${loot.first ? ' / ' + d.first : ''}</p><p>${SLOTS.map((slot, n) => `${d.slots[n]} ${d.blueprints} +${loot.blueprints[slot]}`).join(' / ')}</p><div class="gear-bag">${loot.items.map(i => itemCard(i, save)).join('')}</div>` : ''}${sim.status !== 'won' ? `<p>${short ? d.short.replace('{n}', String(short)) : d.enough}</p>` : ''}${btn('gear-view', d.upgrade, 'primary', 'data-id=equipment')}</section>`; }
+function resultUI() { const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${d.sectorNames[r.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship">${shipCanvas(save.ship)}</div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && r.sector < 5 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}${rewardUI()}<div class="button-row">${btn('shop', tr('shop'), 'primary', 'data-autofocus')}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'quiet')}${btn('copy-record', tr('copyRecord'))}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
+function animateResults(now) { for (const el of app.querySelectorAll('[data-power]')) {
+    const f = save.settings.reduced ? 1 : clamp((now - powerAt) / 600, 0, 1);
+    el.textContent = String(Math.round(Number(el.dataset.from) + (Number(el.dataset.power) - Number(el.dataset.from)) * (1 - (1 - f) ** 3)));
+} if (view !== 'result')
     return; for (const el of app.querySelectorAll('[data-tally]')) {
     const n = Number(el.dataset.tally), f = save.settings.reduced ? 1 : clamp((now - resultAt) / 1000 - Number(el.dataset.delay), 0, 1), value = Math.round(n * (1 - (1 - f) ** 3));
     el.textContent = el.dataset.clock ? clock(value) : String(value);
@@ -170,6 +179,13 @@ function drawUI() {
         return;
     }
     let content = '';
+    if (view === 'equipment' || view === 'fusion' || view === 'gacha') {
+        content = equipmentUI(save, view, selectedGear, slotFilter, rankFilter, gearSort, drawnGear, previousPower);
+        powerAt = performance.now();
+        previousPower = combatPower(save);
+    }
+    if (view === 'chapters')
+        content = chapterUI(save, selectedSector);
     if (view === 'choice')
         content = choiceUI();
     if (view === 'sound')
@@ -188,7 +204,7 @@ function drawUI() {
         const slot = sim.weapons.find(w => w.id === lastEvolved), i = WEAPONS.findIndex(w => w.id === slot?.id);
         content = `<div class="evolution-show"><div class="evolution-icon">${icon(slot?.id ?? 'pulse', true)}</div><h2>${tr('evolved')}</h2><h3>${dict().evolutionNames[Math.max(0, i)]}</h3><p>${dict().evolutionDescriptions[Math.max(0, i)]}</p>${btn('continue', tr('resume'), 'primary', 'data-autofocus')}</div>`;
     }
-    app.innerHTML = `<div id="overlay"><section id="dialog" class="${view === 'shop' ? 'wide' : ''} ${view}-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">${content}</section></div>`;
+    app.innerHTML = `<div id="overlay"><section id="dialog" class="${['shop', 'equipment', 'fusion', 'gacha', 'chapters'].includes(view) ? 'wide' : ''} ${view}-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">${content}</section></div>`;
     const h = app.querySelector('h2');
     if (h)
         h.id = 'dialog-title';
@@ -198,7 +214,7 @@ function drawUI() {
     focusFirst();
 }
 function start() { if (selectedSector > save.unlocked || (hangarIndex >= 0 && !save.ships.includes(SHIPS[hangarIndex].id)))
-    return; audio.unlock(); audio.ui('start'); frameStats.reset(); sim = new Simulation(save.ship, save.meta, Date.now(), undefined, selectedSector, difficulty); V.camX = sim.player.x; V.camY = sim.player.y; setView('playing'); }
+    return; audio.unlock(); audio.ui('start'); frameStats.reset(); sim = new Simulation(save.ship, save.meta, Date.now(), undefined, selectedSector, difficulty, save.equipment); V.camX = sim.player.x; V.camY = sim.player.y; setView('playing'); }
 function openChoice() { if (!sim || sim.status !== 'playing')
     return; if (!sim.pendingLevels && !sim.pendingChests) {
     setView('playing');
@@ -256,6 +272,79 @@ catch {
     box.select();
 } }
 function action(act, id = '') {
+    if (act === 'gear-view') {
+        if (!['equipment', 'fusion', 'gacha'].includes(id))
+            return;
+        if (!['equipment', 'fusion', 'gacha'].includes(view))
+            gearReturn = view;
+        setView(id);
+        return;
+    }
+    if (act === 'chapters') {
+        setView('chapters');
+        return;
+    }
+    if (act === 'chapter-pick') {
+        const n = Number(id);
+        if (!Number.isInteger(n) || n < 0 || n > save.unlocked)
+            return;
+        selectedSector = n;
+        setView('title');
+        return;
+    }
+    if (act === 'gear-inspect') {
+        selectedGear = Number(id);
+        if (view !== 'equipment') {
+            if (!['fusion', 'gacha'].includes(view))
+                gearReturn = view;
+            setView('equipment');
+        }
+        else
+            drawUI();
+        app.querySelector('.gear-detail')?.scrollIntoView({ block: 'start' });
+        return;
+    }
+    if (act === 'test-currency') {
+        if (!DEV && !PLAYTEST)
+            return;
+        save = { ...save, equipment: testCurrency(save.equipment) };
+        persist();
+        drawUI();
+        return;
+    }
+    if (['gear-equip', 'gear-level', 'gear-fuse', 'gear-fuse-all', 'gear-dismantle', 'gear-pull'].includes(act)) {
+        const uid = Number(id), scroll = app.querySelector('#dialog')?.scrollTop ?? 0;
+        let next = save.equipment;
+        if (act === 'gear-equip')
+            next = equip(next, uid);
+        if (act === 'gear-level')
+            next = upgrade(next, uid);
+        if (act === 'gear-fuse')
+            next = fuse(next, uid);
+        if (act === 'gear-fuse-all')
+            next = fuseAll(next);
+        if (act === 'gear-dismantle')
+            next = dismantle(next, uid);
+        if (act === 'gear-pull') {
+            const result = pull(next, Number(id), Math.random);
+            next = result.state;
+            drawnGear = result.items;
+        }
+        save = { ...save, equipment: next };
+        if (!next.items.some(i => i.uid === selectedGear))
+            selectedGear = next.items[0]?.uid ?? 0;
+        persist();
+        drawUI();
+        const dialog = app.querySelector('#dialog');
+        if (dialog && act !== 'gear-pull')
+            dialog.scrollTop = scroll;
+        if (act === 'gear-pull' && drawnGear.length) {
+            const sequence = ++pullSequence;
+            window.setTimeout(() => { if (view === 'gacha' && sequence === pullSequence)
+                app.querySelector('.pull-reveal')?.scrollIntoView({ block: 'start' }); }, save.settings.reduced ? 0 : 1100);
+        }
+        return;
+    }
     if (act === 'copy-record') {
         void copyRecord();
         return;
@@ -328,6 +417,8 @@ function action(act, id = '') {
     }
     if (act === 'sector') {
         const n = Number(id);
+        if (!Number.isInteger(n) || n < 0 || n >= CHAPTERS.length)
+            return;
         if (n > save.unlocked) {
             audio.ui('locked');
             toast(tr('clearFirst'));
@@ -349,6 +440,10 @@ function action(act, id = '') {
     }
     if (act === 'back') {
         audio.ui('back');
+        if (['equipment', 'fusion', 'gacha'].includes(view)) {
+            setView(gearReturn);
+            return;
+        }
         setView(view === 'settings' ? returnView : view === 'shop' ? shopReturn : 'title');
         return;
     }
@@ -617,7 +712,16 @@ app.addEventListener('pointerover', e => { const b = e.target.closest('button');
     audio.ui(b.disabled ? 'locked' : 'hover'); });
 app.addEventListener('focusin', e => { if (e.target.matches('button'))
     audio.ui('hover'); });
-app.addEventListener('change', e => { const el = e.target; if (el.id === 'difficulty')
+app.addEventListener('change', e => { const el = e.target; if (el.dataset.gearFilter) {
+    if (el.dataset.gearFilter === 'slot')
+        slotFilter = el.value;
+    if (el.dataset.gearFilter === 'rank')
+        rankFilter = el.value;
+    if (el.dataset.gearFilter === 'sort')
+        gearSort = el.value;
+    drawUI();
+    return;
+} if (el.id === 'difficulty')
     difficulty = el.value; if (el.dataset.setting === 'lang') {
     save.settings.lang = el.value === 'en' ? 'en' : 'ko';
     persist();
@@ -765,6 +869,8 @@ for (const image of [...new Set(SECTORS.map(s => s.image).concat(['horsehead.jpg
     img.onload = () => { Object.defineProperty(img, 'pixelReady', { value: true }); V.images[image] = img; };
     img.src = './assets/pixel/photos/' + image.replace('.jpg', '.png');
 }
+if (storageRaw && !parsed.future && !parsed.warning && JSON.parse(storageRaw).version === 2)
+    persist();
 audio.setScene('title');
 prepareShipFrames();
 resize();
@@ -778,6 +884,31 @@ function previewScreen(screen) {
     preview = true;
     hangarIndex = -1;
     save = { ...defaultSave(), unlocked: 5, shards: 500, ships: SHIPS.map(s => s.id) };
+    if (['equipment', 'fusion', 'gacha', 'chapters', 'rewards'].includes(screen)) {
+        save.equipment.gold = 15000;
+        save.equipment.gems = 900;
+        for (const slot of SLOTS)
+            save.equipment.blueprints[slot] = 100;
+        for (const def of GEAR) {
+            save.equipment = addItem(save.equipment, def.id, 2);
+            save.equipment = addItem(save.equipment, def.id, 2);
+            save.equipment = addItem(save.equipment, def.id, 2);
+        }
+        selectedGear = 7;
+        drawnGear = [7, 10, 13];
+        if (screen === 'rewards') {
+            sim = new Simulation(save.ship, save.meta, 42, 'preview-rewards', 2, 'normal', save.equipment);
+            sim.time = 448;
+            sim.kills = 1400;
+            sim.status = 'lost';
+            sim.bossRecords = [{ id: 1, art: 6, role: 'captain', spawned: 90, killed: 120, phases: [105], hp: 1000 }, { id: 2, art: 7, role: 'captain', spawned: 210, killed: 240, phases: [225], hp: 1200 }];
+            save = settle(save, sim.result());
+            setView('result');
+            return;
+        }
+        setView(screen);
+        return;
+    }
     if (screen === 'sound') {
         sim = null;
         setView('sound');

@@ -1,11 +1,13 @@
 import { META, PASSIVES, SHIPS, WAVES, WEAPONS } from './data.js';
+import { emptyEquipment, parseEquipment } from './equipment.js';
+import { awardRun, shardReward } from './economy.js';
 export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 export const xpNeeded = (level) => level === 1 ? 54 : Math.round(level > 25 ? 2693 + (level - 25) * 35 : 68 + level * 10 + level * level * 3.8);
 export const hpScale = (seconds) => 1 + Math.max(0, seconds) * .003;
 export const waveAt = (seconds) => WAVES[clamp(Math.floor(seconds / 60), 0, 9)];
 export function rng(seed) { let a = seed | 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 export const SAVE_KEY = 'cosmos-survivor.save.v2';
-export function defaultSave() { return { version: 2, shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
+export function defaultSave() { return { version: 3, equipment: emptyEquipment(), shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
 const int = (v, max = 1e9) => typeof v === 'number' && Number.isFinite(v) ? clamp(Math.floor(v), 0, max) : 0;
 const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) ? v : {};
 export function parseSave(raw) {
@@ -16,9 +18,9 @@ export function parseSave(raw) {
         if (raw.length > 100000)
             throw Error('size');
         const data = record(JSON.parse(raw));
-        if (typeof data.version === 'number' && data.version > 2)
+        if (typeof data.version === 'number' && data.version > 3)
             return { save, warning: true, future: true };
-        if (data.version !== 2)
+        if (data.version !== 2 && data.version !== 3)
             throw Error('version');
         save.shards = int(data.shards);
         save.runs = int(data.runs);
@@ -47,6 +49,10 @@ export function parseSave(raw) {
             save.settings.lang = 'en';
         if (Array.isArray(data.settled))
             save.settled = data.settled.filter((v) => typeof v === 'string' && v.length < 100).slice(-100);
+        if (data.version === 3)
+            save.equipment = parseEquipment(data.equipment);
+        else
+            save.equipment.cleared = Array.from({ length: save.unlocked }, (_, i) => i);
         return { save, warning: false, future: false };
     }
     catch {
@@ -61,9 +67,10 @@ export function unlockShip(save, id) { const def = SHIPS.find(s => s.id === id);
     return save; return { ...save, shards: save.shards - def.cost, ships: [...save.ships, id] }; }
 export function refund(save) { let amount = 0; for (const m of META)
     amount += m.cost * save.meta[m.id] * (save.meta[m.id] + 1) / 2; return { ...save, shards: save.shards + amount, meta: defaultSave().meta }; }
-export const reward = (time, kills, bonus, won) => Math.floor(time / 8) + Math.floor(kills / 8) + Math.floor(bonus) + (won ? 100 : 0);
+export const reward = shardReward;
 export function settle(save, result) { if (save.settled.includes(result.id))
-    return save; return { ...save, shards: save.shards + int(result.earned), runs: save.runs + 1, wins: save.wins + Number(result.won), kills: save.kills + int(result.kills), evolutions: save.evolutions + int(result.evolutions), best: Math.max(save.best, int(result.time, 660)), unlocked: result.won ? Math.max(save.unlocked, Math.min(5, int(result.sector, 5) + 1)) : save.unlocked, settled: [...save.settled, result.id].slice(-100) }; }
+    return save; const r = { ...result, time: int(result.time, 660), kills: int(result.kills), sector: int(result.sector, 5), bosses: int(result.bosses, 5) }; const totals = { runs: save.runs + 1, kills: save.kills + r.kills, evolutions: save.evolutions + int(r.evolutions) }; let seed = 0; for (const c of r.id)
+    seed = Math.imul(seed, 31) + c.charCodeAt(0) | 0; return { ...save, ...totals, equipment: awardRun(save.equipment, r, rng(seed), totals), shards: save.shards + int(r.earned), wins: save.wins + Number(r.won), best: Math.max(save.best, r.time), unlocked: r.won ? Math.max(save.unlocked, Math.min(5, r.sector + 1)) : save.unlocked, settled: [...save.settled, r.id].slice(-100) }; }
 export function stats(ship, passives, meta) {
     const s = SHIPS.find(s => s.id === ship), p = (key) => passives[key] ?? 0;
     return { maxHp: s.hp * (1 + p('hull') * .2) + meta.hull * 12, speed: s.speed * (1 + p('speed') * .08 + meta.thrust * .04), damage: 1 + p('power') * .12 + meta.output * .06, cooldown: (1 - p('haste') * .07) * (ship === 'vega' ? .85 : 1), area: 1 + p('area') * .12, magnet: 100 * (1 + p('magnet') * .3 + meta.magnet * .15), regen: .18 + p('regen') * .4 + meta.repair * .2, armor: p('armor') + meta.guard + (ship === 'atlas' ? 2 : 0), xp: 1 + meta.learning * .05 };
