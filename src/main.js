@@ -1,3 +1,5 @@
+import { arrivalFor, arrivalNames } from './encounters.js';
+import { CombatNotice } from './notices.js';
 import { fieldScale } from './horde.js';
 import { CREW } from './crew.js';
 import { chapterDef, crewUnlocked, LOCAL_BOSSES, localBossName } from './chapters.js';
@@ -6,7 +8,7 @@ import { signalCopy } from './i18n.js';
 import { buildPanel, choiceDetails } from './build-ui.js';
 import { FUSIONS } from './combat-rules.js';
 import { RUN_CHESTS } from './economy.js';
-import { BOSS_ENCOUNTERS, META, PASSIVES, SECTORS, SHIPS, WEAPONS } from './data.js';
+import { META, PASSIVES, SECTORS, SHIPS, WEAPONS } from './data.js';
 import { SAVE_KEY, clamp, deadzone, defaultSave, metaCost, parseSave, purchase, refund, settle, unlockShip, weaponStats, xpNeeded } from './core.js';
 import { Simulation } from './sim.js';
 import { text, t, equipmentCopy, combatCopy, rankCopy } from './i18n.js';
@@ -69,7 +71,15 @@ const esc = (s) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>':
 const clock = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const btn = (act, label, style = '', extra = '') => `<button class="btn ${style}" data-act="${act}" ${extra}>${label}</button>`;
 const heading = (name, note = '', back = true) => `<div class="dialog-head"><div><h2>${name}</h2>${note ? `<p class="muted">${note}</p>` : ''}</div>${back ? btn('back', tr('back'), 'small') : ''}</div>`;
-function toast(message) { let el = document.querySelector('#toast'); if (!el) {
+const combatNotice = new CombatNotice();
+let announcedSim = null;
+const announced = new Set();
+function announce(key, message, priority = 1) { if (announced.has(key))
+    return; announced.add(key); combatNotice.push(key, message, performance.now(), priority, save.settings.lessNotices); }
+function toast(message) { if (view === 'playing') {
+    combatNotice.push('toast:' + message, message, performance.now(), 1, save.settings.lessNotices);
+    return;
+} let el = document.querySelector('#toast'); if (!el) {
     el = document.createElement('div');
     el.id = 'toast';
     el.role = 'status';
@@ -87,7 +97,7 @@ function resetInput() { frameStats.break(); const stick = document.getElementByI
 function focusFirst() { (app.querySelector('[data-autofocus]:not(:disabled)') ?? app.querySelector('button:not(:disabled),select,input'))?.focus({ preventScroll: true }); }
 function visibleEnemies() { return sim?.enemies.reduce((n, e) => n + Number(e.hp > 0 && !e.hidden && Math.abs(e.x - V.camX) < V.w / V.scale / 2 + e.r && Math.abs(e.y - V.camY) < V.h / V.scale / 2 + e.r), 0) ?? 0; }
 function setView(next) { app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim)
-    audio.combat(sim.sector, sim.time, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0)); drawUI(); }
+    audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0)); drawUI(); }
 function shipCanvas(id, large = false) { return `<canvas class="${large ? 'hero-ship' : 'ship-preview'}" data-ship="${id}" width="${large ? 432 : 96}" height="${large ? 336 : 96}" aria-label="${esc(dict().shipNames[SHIPS.findIndex(s => s.id === id)])}"></canvas>`; }
 function drawShips() {
     for (const ca of app.querySelectorAll('[data-crew]')) {
@@ -113,7 +123,7 @@ function drawChart() { const ca = app.querySelector('.chart-lines'); if (!ca)
         if (Math.floor(n / 4) % 2 === 0)
             c.fillRect(Math.round(x + (ex - x) * n / steps), Math.round(y + (ey - y) * n / steps), 1, 1);
 } }
-function hudUI() { return `<section id="hud" aria-label="${tr('hp')}"><div class="mission-box panel"><h2 id="hud-sector"></h2><div class="run-progress"><i id="run-fill"></i></div></div><div class="hud-actions">${btn('pause', '&#8545;', 'icon-btn', `aria-label="${tr('pause')}"`)}${btn('fullscreen', tr('fullscreen'), 'small')}</div><div id="upgrade-chips"></div><div class="minimap-wrap panel"><div><span>${tr('minimap')}</span><span id="map-time"></span></div><canvas id="minimap" width="90" height="60" aria-label="${tr('minimap')}"></canvas></div><div id="bossbar" class="panel" hidden><div><b id="boss-name"></b><span id="boss-phase"></span></div><div class="meter"><i id="boss-fill"></i></div></div><div id="incoming" class="panel" hidden><span id="incoming-kind"></span><b id="incoming-count"></b><small>${tr('safe')}</small></div><div id="danger-label" hidden>${tr('warning')}</div><div id="objective-label"></div><div class="status-box panel" id="status-box"><div class="lv-badge"><small>${tr('level')}</small><b id="hud-level"></b></div><div class="bars"><div class="bar-row"><span>${tr('hp')}</span><div class="meter hp"><i id="hp-fill"></i><em id="hud-hp"></em></div></div><div class="bar-row"><span>${tr('xp')}</span><div class="meter xp"><i id="xp-fill"></i><em id="hud-xp"></em></div></div></div><div class="ship-tag"><b id="hud-ship"></b><span id="hud-time"></span></div></div><div id="joystick" role="group" aria-label="${tr('move')}"><div id="stick"></div><span>${tr('move')}</span></div><button id="dash-btn" aria-label="${tr('dash')}"><b>&#8599;</b><span id="dash-text">${tr('dash')}</span></button><span id="perf" hidden></span></section>`; }
+function hudUI() { return `<section id="hud" aria-label="${tr('hp')}"><div class="mission-box panel"><h2 id="hud-sector"></h2></div><div class="run-progress" role="progressbar" aria-label="${save.settings.lang === 'ko' ? '챕터 진행' : 'Chapter progress'}" aria-valuemin="0" aria-valuemax="100"><i id="run-fill"></i>${sim?.encounters.map((b, i) => `<span class="boss-marker ${b.role === 'final' ? 'final' : ''}" style="left:${b.at / sim.duration * 100}%" title="${clock(b.at)}" data-boss="${i}">${b.role === 'final' ? '◆' : '◇'}</span>`).join('') ?? ''}<b id="run-percent"></b></div><div class="hud-actions">${btn('pause', '&#8545;', 'icon-btn', `aria-label="${tr('pause')}"`)}${btn('fullscreen', tr('fullscreen'), 'small')}</div><div id="upgrade-chips"></div><div class="minimap-wrap panel"><div><span>${tr('minimap')}</span><span id="map-time"></span></div><canvas id="minimap" width="90" height="60" aria-label="${tr('minimap')}"></canvas></div><div id="bossbar" class="panel" hidden><div><b id="boss-name"></b><span id="boss-phase"></span></div><div class="meter"><i id="boss-fill"></i></div></div><div id="incoming" role="status" aria-live="polite" hidden><span id="incoming-kind"></span><b id="incoming-count"></b></div><div id="danger-label" hidden>${tr('warning')}</div><div id="objective-label"></div><div class="status-box panel" id="status-box"><div class="lv-badge"><small>${tr('level')}</small><b id="hud-level"></b></div><div class="bars"><div class="bar-row"><span>${tr('hp')}</span><div class="meter hp"><i id="hp-fill"></i><em id="hud-hp"></em></div></div><div class="bar-row"><span>${tr('xp')}</span><div class="meter xp"><i id="xp-fill"></i><em id="hud-xp"></em></div></div></div><div class="ship-tag"><b id="hud-ship"></b><span id="hud-time"></span></div></div><div id="joystick" role="group" aria-label="${tr('move')}"><div id="stick"></div><span>${tr('move')}</span></div><button id="dash-btn" aria-label="${tr('dash')}"><b>&#8599;</b><span id="dash-text">${tr('dash')}</span></button><span id="perf" hidden></span></section>`; }
 function choiceText(c) { const d = dict(); if (c.kind === 'chaos')
     return { name: 'CHAOS', desc: combatCopy(save.settings.lang).chaos[Number(c.id)], rank: 0, new: false, kind: 'CHAOS', icon: icon('chest') }; if (c.kind === 'fusion') {
     const f = FUSIONS.find(f => f.id === c.id);
@@ -160,7 +170,7 @@ function choiceChange(c) {
 }
 function choiceUI() { return heading(chest ? rankCopy[sim.chestRank][save.settings.lang] + ' ' + tr('chest') + ' / ' + combatCopy(save.settings.lang).remaining + ' ' + (sim.chestQueue[0]?.remaining ?? 1) : tr('levelup'), banishing ? tr('banishHint') : tr('pick'), false) + `<div class="upgrade-grid">${offers.map((c, i) => { const x = choiceText(c), change = choiceChange(c); return `<button class="upgrade-card ${c.kind === 'evolve' || c.kind === 'fusion' || c.kind === 'chaos' ? 'evolve-card' : c.kind === 'passive' ? 'passive-card' : 'weapon-card'}" data-act="choose" data-id="${i}" style="--order:${i}" ${banishing && !['weapon', 'passive'].includes(c.kind) ? 'disabled' : ''}><div class="card-cap"><span>${x.kind}</span><kbd>${i + 1}</kbd></div><div class="item-portrait">${x.icon}${x.new ? '<b class="new-tag">NEW</b>' : ''}</div><h3>${x.name}</h3>${x.rank ? pips(x.rank, c.kind === 'passive' ? 6 : 8) : ''}<p class="card-level">${change.rank}</p><p>${x.desc}</p><p class="upgrade-gain">${change.gain}</p>${choiceDetails(sim, c, save.settings.lang)}</button>`; }).join('')}</div><div class="button-row">${btn('reroll', tr('reroll') + ` (${sim.rerolls})`, '', sim.rerolls <= 0 ? 'disabled' : '')}${btn('skip-cue', tr('skipCue'), 'quiet')}${btn('banish', tr(banishing ? 'cancel' : 'banish') + ` (${sim.banishes})`, 'quiet', sim.banishes <= 0 ? 'disabled' : '')}</div>`; }
 function shopUI() { const d = dict(), selected = META.find(m => m.id === selectedMeta), mi = META.indexOf(selected), lv = save.meta[selected.id], cost = metaCost(selected.id, lv); return heading(tr('shop')) + `<div class="shop-workbench"><div class="shop-wall"><div class="shop-balance wallet">${icon('shards')}<b>${save.shards}</b></div><div class="shop-grid">${META.map((m, i) => `<button class="shop-card ${selectedMeta === m.id ? 'selected' : ''}" data-act="inspect" data-id="${m.id}" aria-label="${d.metaNames[i]}" aria-pressed="${selectedMeta === m.id}">${icon(m.icon)}${pips(save.meta[m.id])}</button>`).join('')}</div></div><section class="shop-detail"><div class="detail-portrait">${icon(selected.icon)}</div><h3>${d.metaNames[mi]}</h3><p>${d.metaDescriptions[mi]}</p>${pips(lv)}<div class="shop-price">${icon('shards')}<b>${lv >= 5 ? tr('soldOut') : cost}</b></div>${btn('buy', tr('buy'), 'primary', `data-id="${selected.id}" ${lv >= 5 || save.shards < cost ? 'disabled' : ''}`)}</section></div><div class="section-title"><h3>${tr('ships')}</h3></div><div class="shop-ships">${SHIPS.map((ship, i) => `<div class="shop-ship">${shipCanvas(ship.id)}<b>${d.shipNames[i]}</b>${btn('unlock', save.ships.includes(ship.id) ? tr('owned') : icon('shards') + String(ship.cost), 'small', `data-id="${ship.id}" ${save.ships.includes(ship.id) || save.shards < ship.cost ? 'disabled' : ''}`)}</div>`).join('')}</div><div class="button-row">${btn('refund', tr('refund'), 'quiet')}<small>${tr('refundHint')}</small></div>`; }
-function settingsUI() { return heading(tr('settings')) + `${DEV || PLAYTEST ? `<p class="test-build">${equipmentCopy(save.settings.lang).testBuild}</p>${btn('test-currency', equipmentCopy(save.settings.lang).test)}` : ''}` + `<div class="settings-list"><label class="setting-row"><span>${save.settings.lang === 'ko' ? '움직임' : 'Movement'}</span><select data-setting="movement"><option value="weighted" ${save.settings.movement === 'weighted' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '무게감 (기본)' : 'Weighted (default)'}</option><option value="instant" ${save.settings.movement === 'instant' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '즉시' : 'Instant'}</option></select></label><label class="setting-row"><span>${signalCopy(save.settings.lang).setting}</span><select data-setting="telegraphs">${['boss', 'all', 'off'].map((mode, i) => `<option value="${mode}" ${save.settings.telegraphs === mode ? 'selected' : ''}>${signalCopy(save.settings.lang).modes[i]}</option>`).join('')}</select></label><p class="note">${signalCopy(save.settings.lang).hint}</p>${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${esc(tr('controls'))}</p><p>${esc(tr('pointerHint'))}</p><p>${esc(tr('evolveHint'))}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
+function settingsUI() { return heading(tr('settings')) + `${DEV || PLAYTEST ? `<p class="test-build">${equipmentCopy(save.settings.lang).testBuild}</p>${btn('test-currency', equipmentCopy(save.settings.lang).test)}` : ''}` + `<div class="settings-list"><label class="setting-row"><span>${save.settings.lang === 'ko' ? '알림 줄이기' : 'Fewer notifications'}</span><input type="checkbox" data-setting="lessNotices" ${save.settings.lessNotices ? 'checked' : ''}></label><label class="setting-row"><span>${save.settings.lang === 'ko' ? '움직임' : 'Movement'}</span><select data-setting="movement"><option value="weighted" ${save.settings.movement === 'weighted' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '무게감 (기본)' : 'Weighted (default)'}</option><option value="instant" ${save.settings.movement === 'instant' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '즉시' : 'Instant'}</option></select></label><label class="setting-row"><span>${signalCopy(save.settings.lang).setting}</span><select data-setting="telegraphs">${['boss', 'all', 'off'].map((mode, i) => `<option value="${mode}" ${save.settings.telegraphs === mode ? 'selected' : ''}>${signalCopy(save.settings.lang).modes[i]}</option>`).join('')}</select></label><p class="note">${signalCopy(save.settings.lang).hint}</p>${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${esc(tr('controls'))}</p><p>${esc(tr('pointerHint'))}</p><p>${esc(tr('evolveHint'))}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
 function rewardUI() { const d = equipmentCopy(save.settings.lang), loot = save.equipment.lastLoot, short = Math.max(0, chapterDef(sim.chapterKey).recommended - combatPower(save)); return `<section class="equipment-rewards"><h3>${d.reward}</h3>${loot ? `<p>${d.gold} +${loot.gold} / ${d.gems} +${loot.gems} / ${d.chests} ${loot.chests}${loot.first ? ' / ' + d.first : ''}</p><p>${SLOTS.map((slot, n) => `${d.slots[n]} ${d.blueprints} +${loot.blueprints[slot]}`).join(' / ')}</p><div class="gear-bag">${loot.items.map(i => itemCard(i, save)).join('')}</div>` : ''}${sim.status !== 'won' ? `<p>${short ? d.short.replace('{n}', String(short)) : d.enough}</p>` : ''}${btn('gear-view', d.upgrade, 'primary', 'data-id=equipment')}</section>`; }
 function resultUI() { const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${sim.chapter?.[save.settings.lang] ?? d.sectorNames[sim.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship">${shipCanvas(save.ship)}</div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && !r.special && r.sector < 7 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}${rewardUI()}<div class="button-row">${btn('shop', tr('shop'), 'primary', 'data-autofocus')}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'quiet')}${btn('copy-record', tr('copyRecord'))}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
 function animateResults(now) { for (const el of app.querySelectorAll('[data-power]')) {
@@ -563,7 +573,7 @@ function updateHUD() {
         el.textContent = value; }, fill = (id, value) => { const el = document.getElementById(id); if (el)
         el.style.width = `${clamp(value, 0, 1) * 100}%`; };
     set('hud-sector', sim.chapter?.[save.settings.lang] ?? d.sectorNames[sim.sector]);
-    fill('run-fill', sim.time / 600);
+    fill('run-fill', sim.progress);
     set('hud-level', String(sim.level));
     set('hud-hp', `${Math.ceil(p.hp)} / ${Math.round(p.maxHp)}`);
     fill('hp-fill', p.hp / p.maxHp);
@@ -582,12 +592,42 @@ function updateHUD() {
         document.getElementById('bossbar').style.setProperty('--stage-width', `${100 / boss.stages}%`);
         fill('boss-fill', boss.hp / boss.maxHp);
     }
-    const next = BOSS_ENCOUNTERS[sim.encounterIndex], remaining = (next?.at ?? Infinity) - sim.time, last = sim.bossRecords.at(-1), arriving = !!last && sim.time - last.spawned < 2.8, swarm = sim.time < sim.swarmUntil;
-    document.getElementById('incoming').hidden = !(remaining <= 3 && remaining > 0) && !arriving && !swarm;
-    set('incoming-kind', swarm && !arriving ? d.swarmArrival : d.incoming);
-    set('incoming-count', arriving ? (sim.expedition && localBossName(sim.chapter.id, last.art, last.role === 'final') || d.bossNames[last.art]) : remaining <= 3 ? String(Math.ceil(remaining)) : swarm ? d.swarmArrival : '');
+    if (announcedSim !== sim) {
+        announcedSim = sim;
+        announced.clear();
+        combatNotice.clear();
+    }
+    const next = sim.encounters[sim.encounterIndex], remaining = (next?.at ?? Infinity) - sim.time, last = sim.bossRecords.at(-1);
+    const bossLabel = (art, final) => sim.expedition && localBossName(sim.chapter.id, art, final) || d.bossNames[art];
+    if (remaining <= 2.5 && remaining > 0)
+        announce('warning:' + sim.encounterIndex, (save.settings.lang === 'ko' ? '접근 감지 · ' : 'Approaching · ') + bossLabel(next.art < 0 ? sim.sector : next.art, next.role === 'final'), 2);
+    if (last && sim.time - last.spawned < 1.5)
+        announce('boss:' + last.id, (last.role === 'final' ? (save.settings.lang === 'ko' ? '최종 보스 · ' : 'Final boss · ') : '') + bossLabel(last.art, last.role === 'final'), 3);
+    if (sim.swarmIndex && sim.time - sim.swarmStarted < 1.5)
+        announce('swarm:' + sim.swarmIndex, arrivalNames[save.settings.lang][arrivalFor(sim.chapter?.id ?? '')]);
+    const message = combatNotice.current(performance.now()), incoming = document.getElementById('incoming');
+    incoming.hidden = !message;
+    if (message && incoming.dataset.notice !== String(combatNotice.started)) {
+        incoming.dataset.notice = String(combatNotice.started);
+        incoming.style.animation = 'none';
+        void incoming.offsetWidth;
+        incoming.style.animation = '';
+    }
+    incoming.classList.toggle('final', !!last && last.role === 'final' && combatNotice.key === 'boss:' + last.id);
+    set('incoming-kind', '');
+    set('incoming-count', message);
+    const progress = document.querySelector('.run-progress');
+    progress?.setAttribute('aria-valuenow', String(Math.floor(sim.progress * 100)));
+    set('run-percent', Math.floor(sim.progress * 100) + '%');
+    for (const marker of document.querySelectorAll('[data-boss]')) {
+        const record = sim.bossRecords[Number(marker.dataset.boss)];
+        marker.classList.toggle('cleared', record?.killed != null);
+        marker.classList.toggle('active', !!record && record.killed == null);
+    }
+    document.getElementById('bossbar').classList.toggle('final', boss?.role === 'final');
     document.getElementById('danger-label').hidden = save.settings.telegraphs === 'off' || !sim.hazards.some(h => h.age < h.warning && (h.boss || save.settings.telegraphs === 'all')) && !boss?.warnTime;
-    set('objective-label', sim.beacon ? tr('beaconDesc') : sim.drops.length ? tr('findChest') : '');
+    set('objective-label', sim.beacon ? '◈' : sim.drops.length ? '▣' : '');
+    document.getElementById('objective-label').title = sim.beacon ? tr('beaconDesc') : sim.drops.length ? tr('findChest') : '';
     const chips = document.getElementById('upgrade-chips'), markup = `<div class="slot-label">${tr('weapon')} ${sim.weapons.length}/6</div><div class="slot-row">${Array.from({ length: 6 }, (_, i) => { const w = sim.weapons[i], wi = w ? WEAPONS.findIndex(d => d.id === w.id) : -1; return `<span class="slot ${w?.evolved ? 'evolved' : ''}" ${w ? `title="${esc(w.fusion ? combatCopy(save.settings.lang).fusionNames[FUSIONS.findIndex(f => f.id === w.fusion)] : w.evolved ? d.evolutionNames[wi] : d.weaponNames[wi])}"` : ''}>${w ? icon(w.id, w.evolved) + `<small>${w.evolved ? '&#9733;' : w.level >= 8 ? d.max : w.level}</small>` : ''}</span>`; }).join('')}</div><div class="slot-label">${tr('passive')} ${Object.keys(sim.passives).length}/6</div><div class="slot-row">${Array.from({ length: 6 }, (_, i) => { const id = Object.keys(sim.passives)[i]; return `<span class="slot">${id ? icon(id) + `<small>${sim.passives[id] >= 6 ? d.max : sim.passives[id]}</small>` : ''}</span>`; }).join('')}</div>${Object.values(sim.boosts).some(n => n > 0) ? `<div class="extra-boosts">${d.stacked}: ${d.boostDescriptions.map((label, i) => label.replace(/\d+/, String([sim.boosts.damage * 3, sim.boosts.hull * 5, sim.boosts.reach * 5][i]))).join(' / ')}</div>` : ''}`;
     if (chips.innerHTML !== markup)
         chips.innerHTML = markup;
@@ -686,13 +726,13 @@ function pollPad(now) {
     padBefore = pressed;
 }
 function advance(dt) { if (!sim || view !== 'playing' || stressPreview)
-    return; sim.viewWidth = V.w / V.scale; sim.viewHeight = V.h / V.scale; sim.step(dt, inputState()); cosmos.consumeEvents(sim.events); audio.consume(sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }); audio.combat(sim.sector, sim.time, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0)); if (sim.events.some(e => e.kind === 'boss')) {
+    return; sim.viewWidth = V.w / V.scale; sim.viewHeight = V.h / V.scale; sim.step(dt, inputState()); cosmos.consumeEvents(sim.events); audio.consume(sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }); audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0)); if (sim.events.some(e => e.kind === 'boss')) {
     document.getElementById('cue-skip')?.remove();
     app.insertAdjacentHTML('beforeend', btn('skip-cue', tr('skipCue'), 'cue-skip', 'id="cue-skip"'));
 } sim.events.length = 0; if (sim.status !== 'playing') {
     finish();
     return;
-} if (sim.pendingLevels || sim.pendingChests)
+} if (!sim.bossKilled && (sim.pendingLevels || sim.pendingChests))
     openChoice(); }
 function frame(now) {
     frameStats.observe(now, view === 'playing' && !document.hidden);
@@ -826,7 +866,7 @@ app.addEventListener('input', e => { const el = e.target, k = el.dataset.setting
     audio.update(save.settings);
     persist();
 }
-else if (k === 'reduced' || k === 'numbers') {
+else if (k === 'reduced' || k === 'numbers' || k === 'lessNotices') {
     save.settings[k] = el.checked;
     persist();
 } });

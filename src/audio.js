@@ -25,6 +25,8 @@ export class AudioEngine {
     musicGroup = null;
     manual = false;
     musicGroups = new Set();
+    victoryUntil = 0;
+    bossActive = false;
     worker = null;
     pendingTimbres = new Set();
     constructor(settings) { this.settings = settings; }
@@ -80,8 +82,16 @@ export class AudioEngine {
         if (!active)
             this.stopMusic();
     }
-    combat(sector, seconds, enemies, boss) { if (this.manual)
-        return; this.requestedTrack = boss ? 'boss' : ['nebula', 'open', 'globular', 'milkyway', 'galaxies', 'expansion'][sector] ?? 'nebula'; this.requestedIntensity = musicIntensity(seconds, enemies, this.requestedIntensity); }
+    combat(sector, seconds, enemies, boss, final = false) {
+        if (this.manual)
+            return;
+        const track = boss ? 'boss' : ['nebula', 'open', 'globular', 'milkyway', 'galaxies', 'expansion'][sector] ?? 'nebula';
+        if (boss && !this.bossActive && this.ctx)
+            this.nextBar = Math.min(this.nextBar, this.ctx.currentTime + .025);
+        this.bossActive = boss;
+        this.requestedTrack = track;
+        this.requestedIntensity = boss ? (final ? 3 : 2) : musicIntensity(seconds, enemies, this.requestedIntensity);
+    }
     previewTrack(track, intensity) { this.stopMusic(); this.track = this.requestedTrack = track; this.intensity = this.requestedIntensity = intensity; this.bars.set(track, 0); this.manual = true; this.playing = true; }
     stopMusic() {
         if (this.ctx && this.musicGroup) {
@@ -167,6 +177,16 @@ export class AudioEngine {
     consume(events, view) {
         this.spatial = view;
         for (const e of events) {
+            if (e.kind === 'bossWarning') {
+                this.play('boss', { gain: .65, pitch: .7 });
+                this.warmMusic(composeBar('boss', this.bars.get('boss') ?? 0, e.value ? 3 : 2));
+                continue;
+            }
+            if (e.kind === 'kill' && e.value === 2) {
+                this.stopMusic();
+                this.play('clear', { gain: .8 });
+                this.victoryUntil = (this.ctx?.currentTime ?? 0) + 2.1;
+            }
             let id;
             if (e.kind === 'foot' || e.kind === 'material') {
                 this.play(e.kind === 'foot' ? 'air' : 'pulse', { gain: e.kind === 'foot' ? .22 : .35, x: e.x, y: e.y, pitch: [.65, 1.4, .8, 1.8, .95, 1.1][e.value] ?? 1 });
@@ -223,7 +243,7 @@ export class AudioEngine {
         if (!this.playing || this.settings.music === 0)
             return;
         const ready = this.warmMusic(composeBar(this.requestedTrack, this.bars.get(this.requestedTrack) ?? 0, this.requestedIntensity));
-        if (this.nextBar > now + .16)
+        if (now < this.victoryUntil || this.nextBar > now + .16)
             return;
         if (!ready)
             return;

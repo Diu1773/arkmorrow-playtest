@@ -88,7 +88,7 @@ export function updateSurface(s, dt) {
             const t = s.terrain[0];
             s.hazard('shell', t.x, t.y, { boss: true, r0: 0, r1: 160, warning: 1.4, duration: .5, damage: 18, gaps: [], gapW: 0 });
         }
-        if (s.time > 420 && (s.player.x < 180 || s.player.x > 4620 || s.player.y < 150 || s.player.y > 3050))
+        if (s.timeline > 420 && (s.player.x < 180 || s.player.x > 4620 || s.player.y < 150 || s.player.y > 3050))
             s.hurt(4, 'friction');
     }
 }
@@ -118,4 +118,4 @@ export function localSpawn(s, type, crowd = false) { const id = s.chapter?.id ??
     return id === 'village' ? 'gnat' : id === 'launch' ? 'invader' : 'jelly'; if (crowd && list) {
     const n = s.combatRandom();
     return list[n < .58 ? 0 : n < .83 ? 1 : n < .93 ? 2 : 3];
-} return list && type !== 'boss' && type !== 'decoy' ? list[Math.floor(s.combatRandom() * Math.min(list.length, 1 + Math.floor(s.time / 55)))] : type; }
+} return list && type !== 'boss' && type !== 'decoy' ? list[Math.floor(s.combatRandom() * Math.min(list.length, 1 + Math.floor(s.timeline / 55)))] : type; }

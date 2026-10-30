@@ -1,0 +1,9 @@
+import { BOSS_ENCOUNTERS, SWARM_EVENTS } from './data.js';
+export const CHAPTER_SECONDS = 480;
+export const CHAPTER_RATE = CHAPTER_SECONDS / 600;
+export const CHAPTER_BOSSES = BOSS_ENCOUNTERS.map(b => ({ ...b, at: b.at * CHAPTER_RATE }));
+export const CHAPTER_SWARMS = [{ at: 118, duration: 22, count: 72 }, { at: 264, duration: 24, count: 100 }, { at: 376, duration: 22, count: 120 }];
+export const bossSchedule = (chapter) => chapter ? CHAPTER_BOSSES : BOSS_ENCOUNTERS;
+export const swarmSchedule = (chapter) => chapter ? CHAPTER_SWARMS : SWARM_EVENTS;
+export const arrivalFor = (id) => id === 'launch' ? 'pods' : id === 'atmosphere' ? 'storm' : id === 'village' ? 'crater' : 'vortex';
+export const arrivalNames = { ko: { pods: '강하 포드 접근', storm: '번개 구름 이동', crater: '분화구에서 출현', vortex: '성운 급류 접근' }, en: { pods: 'Drop pods inbound', storm: 'Storm front approaching', crater: 'Crater breach', vortex: 'Nebula current inbound' } };

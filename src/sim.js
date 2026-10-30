@@ -1,3 +1,4 @@
+import { CHAPTER_RATE, CHAPTER_SECONDS, bossSchedule, swarmSchedule, arrivalFor } from './encounters.js';
 import { hordeTarget } from './horde.js';
 import { chapterDef, LOCAL_ENEMIES, LOCAL_PATTERNS } from './chapters.js';
 import { CREW } from './crew.js';
@@ -6,7 +7,7 @@ import { weaponAim } from './aim.js';
 import { warningShapes } from './telegraph.js';
 import { attackSkill, elementOf, impact, statusHit, updateBattleEffects } from './battle.js';
 import { canFuse, emptyStatus, FUSIONS } from './combat-rules.js';
-import { BEHAVIORS, CHAPTER_ENEMIES, ELITES, ENEMY_BEHAVIOR, ENEMY_XP, ELEMENTS, PASSIVES, BOSS_ENCOUNTERS, CAPTAINS, ENEMIES, MODES, SECTORS, SHIPS, SWARM_EVENTS, WEAPONS, WORLD } from './data.js';
+import { BEHAVIORS, CHAPTER_ENEMIES, ELITES, ENEMY_BEHAVIOR, ENEMY_XP, ELEMENTS, PASSIVES, CAPTAINS, ENEMIES, MODES, SECTORS, SHIPS, WEAPONS, WORLD } from './data.js';
 import { Pool, SpatialHash, canEvolve, choices, clamp, hpScale, moveVector, reward, rng, stats, waveAt, weaponStats, xpNeeded } from './core.js';
 import { gearBonus } from './equipment.js';
 import { CHAPTERS, ECONOMY, RUN_CHESTS, RUN_SKILL_LIMIT, rollRunChest } from './economy.js';
@@ -44,6 +45,14 @@ export class Simulation {
     lastDamageCause = 'unknown';
     telegraphs = 'boss';
     get warningShapes() { return warningShapes(this, this.telegraphs); }
+    get timeline() { return this.expedition ? this.time / CHAPTER_RATE : this.time; }
+    get encounters() { return bossSchedule(this.expedition); }
+    get duration() { return this.expedition ? CHAPTER_SECONDS : 600; }
+    get progress() { return this.bossKilled ? 1 : Math.min(.99, this.time / this.duration); }
+    bossWarning = -1;
+    bossDefeatedAt = -1;
+    arrivalSites = [];
+    swarmStarted = 0;
     time = 0;
     level = 1;
     xp = 0;
@@ -157,6 +166,11 @@ export class Simulation {
             buildSurface(this);
             this.weapons[0].id = this.chapter.kind === 'ground' ? person.weapon : this.weapons[0].id;
             this.player.r = this.crew === 'mew' && this.chapter.kind === 'ground' ? 11 : 16;
+        }
+        if (this.expedition) {
+            this.nextSupply *= CHAPTER_RATE;
+            this.nextBeacon *= CHAPTER_RATE;
+            this.nextElite *= CHAPTER_RATE;
         }
         this.spawn('rusher', 2600, 1600);
         this.spawn('rusher', 2340, 1400);
@@ -294,8 +308,34 @@ export class Simulation {
         }
         return { x: p.x < 2400 ? 4765 : 35, y: p.y < 1600 ? 3165 : 35 };
     }
+    updateArrivals(dt) {
+        for (const site of this.arrivalSites)
+            site.age += dt;
+        this.arrivalSites = this.arrivalSites.filter(site => site.age < 3);
+        if (this.time >= this.swarmUntil || this.enemies.some(e => e.type === 'boss' && e.hp > 0))
+            return;
+        const kind = arrivalFor(this.chapter.id), p = this.player;
+        if (kind === 'pods' || kind === 'crater') {
+            const interval = kind === 'pods' ? 1.4 : 3;
+            if (Math.floor((this.time - this.swarmStarted) / interval) > Math.floor((this.time - this.swarmStarted - dt) / interval) || !this.arrivalSites.length) {
+                const a = this.swarmIndex * 1.9 + Math.floor((this.time - this.swarmStarted) / interval) * 2.4, d = kind === 'pods' ? 320 : 420;
+                this.arrivalSites.push({ x: clamp(p.x + Math.cos(a) * d, 80, 4720), y: clamp(p.y + Math.sin(a) * d, 80, 3120), age: 0, spawned: false });
+            }
+            for (const site of this.arrivalSites)
+                if (site.age >= 1 && !site.spawned) {
+                    site.spawned = true;
+                    this.effect('blast', site.x, site.y, kind === 'pods' ? 60 : 100, kind === 'pods' ? '#d4b67e' : '#bc825e', .6);
+                    for (let i = 0; i < 8; i++) {
+                        const a = i / 8 * TAU;
+                        this.spawn('rusher', site.x + Math.cos(a) * 35, site.y + Math.sin(a) * 35, '', false, true);
+                    }
+                }
+        }
+    }
     updateHorde(dt) {
-        const boss = this.enemies.some(e => e.type === 'boss' && e.hp > 0), target = hordeTarget(this.time, boss, this.time < this.swarmUntil);
+        if (this.bossKilled)
+            return;
+        const boss = this.enemies.some(e => e.type === 'boss' && e.hp > 0), target = hordeTarget(this.timeline, boss, this.time < this.swarmUntil);
         if (boss) {
             let count = this.enemies.length;
             for (let i = this.enemies.length - 1; i >= 0 && count > target; i--) {
@@ -309,7 +349,17 @@ export class Simulation {
         this.crowdBudget = Math.min(20, this.crowdBudget + Math.max(45, (target - this.enemies.length) * 12) * dt);
         while (this.enemies.length < target && this.crowdBudget >= 1) {
             const types = SECTORS[this.sector].types, type = this.time < 35 ? 'rusher' : this.combatRandom() < .3 ? CHAPTER_ENEMIES[this.sector][Math.floor(this.combatRandom() * 4)] : types[Math.floor(this.combatRandom() * Math.min(types.length, 1 + Math.floor(this.time / 65)))];
-            const e = this.spawn(type, undefined, undefined, '', false, true, boss);
+            let point;
+            if (this.time < this.swarmUntil && !boss) {
+                const kind = arrivalFor(this.chapter.id), p = this.player;
+                if (kind === 'storm')
+                    point = { x: clamp(p.x + (this.swarmIndex % 2 ? 1 : -1) * (this.viewWidth / 2 + 60), 35, 4765), y: clamp(p.y + (this.combatRandom() - .5) * this.viewHeight, 35, 3165) };
+                if (kind === 'vortex') {
+                    const a = (this.time - this.swarmStarted) * .4 + this.combatRandom() * .5, r = Math.max(this.viewWidth, this.viewHeight) / 2 + 70;
+                    point = { x: clamp(p.x + Math.cos(a) * r, 35, 4765), y: clamp(p.y + Math.sin(a) * r, 35, 3165) };
+                }
+            }
+            const e = this.spawn(type, point?.x, point?.y, '', false, true, boss);
             if (!e)
                 break;
             this.crowdBudget--;
@@ -338,7 +388,7 @@ export class Simulation {
         this.muzzleTime = .09;
     } const event = { kind, x, y, value, color, weapon, size }; if (this.events.length < 120)
         this.events.push(event);
-    else if (['hurt', 'warning', 'level', 'boss', 'evolve', 'chest', 'reaction'].includes(kind)) {
+    else if (['hurt', 'warning', 'level', 'boss', 'evolve', 'chest', 'reaction', 'bossWarning'].includes(kind)) {
         const i = this.events.findIndex(e => ['hit', 'shoot', 'kill', 'pickup'].includes(e.kind));
         if (i >= 0)
             this.events[i] = event;
@@ -351,14 +401,14 @@ export class Simulation {
             x = point.x;
             y = point.y;
         }
-        if (this.expedition && !this.stress && crowd && type !== 'boss' && this.enemies.length >= hordeTarget(this.time, bossPhase ?? this.enemies.some(n => n.type === 'boss' && n.hp > 0), this.time < this.swarmUntil))
+        if (this.expedition && !this.stress && crowd && type !== 'boss' && this.enemies.length >= hordeTarget(this.timeline, bossPhase ?? this.enemies.some(n => n.type === 'boss' && n.hp > 0), this.time < this.swarmUntil))
             return null;
         const e = this.enemyPool.acquire();
         if (!e)
             return null;
         const p = this.player, def = ENEMIES[type], a = this.random() * TAU, d = 640 + this.random() * 120;
-        const hp = def.hp * (type === 'boss' ? (role === 'middle' ? .32 : 1) : hpScale(this.time)) * (1 + this.sector * .22) * this.mode.hp * (elite ? 6 : 1) * (this.chapter?.hp ?? 1);
-        Object.assign(e, { escort: false, offscreenLag: 0, crowd, id: this.nextId++, type, x: clamp(x ?? p.x + Math.cos(a) * d, 35, 4765), y: clamp(y ?? p.y + Math.sin(a) * d, 35, 3165), r: def.r * (elite ? 1.5 : role === 'captain' ? .85 : type === 'boss' ? 1.15 : 1), angle: a, hp, maxHp: hp, speed: def.speed * (elite ? .8 : 1), damage: def.damage * this.mode.damage * (1 + this.sector * .08), xp: def.xp * (elite ? 5 : 1) * (type === 'boss' ? 1 : this.time >= ENEMY_XP.lateAt ? ENEMY_XP.late : 1), age: 0, timer: 2 + this.random(), flash: 0, orbitHit: -10, warnTime: 0, warnDuration: 0, attackFlash: 0, lastAttack: null, pendingAttack: null, attackIndex: 0, phase: 0, hidden: false, shielded: ENEMY_BEHAVIOR[type] === 'shield', mirror: 0, elite, role, bossArt: this.sector, stages: type === 'boss' ? (role === 'captain' ? 2 : 3) : 1, stageGuard: 0, leader: 0, offX: 0, offY: 0, arm: this.nextId % 2, ti: 20, dir: 1, ttl: 12, status: emptyStatus(), behaviorCD: 2 + this.combatRandom() * 2, action: '', actionTime: 0, actionAngle: a, targetX: 0, targetY: 0, prefix: elite ? ELITES[Math.floor(this.combatRandom() * ELITES.length)] : '' });
+        const hp = def.hp * (type === 'boss' ? (role === 'middle' ? .32 : 1) : hpScale(this.timeline)) * (1 + this.sector * .22) * this.mode.hp * (elite ? 6 : 1) * (this.chapter?.hp ?? 1);
+        Object.assign(e, { escort: false, offscreenLag: 0, crowd, id: this.nextId++, type, x: clamp(x ?? p.x + Math.cos(a) * d, 35, 4765), y: clamp(y ?? p.y + Math.sin(a) * d, 35, 3165), r: def.r * (elite ? 1.5 : role === 'captain' ? .85 : type === 'boss' ? 1.15 : 1), angle: a, hp, maxHp: hp, speed: def.speed * (elite ? .8 : 1), damage: def.damage * this.mode.damage * (1 + this.sector * .08), xp: def.xp * (elite ? 5 : 1) * (type === 'boss' ? 1 : this.timeline >= ENEMY_XP.lateAt ? ENEMY_XP.late : 1), age: 0, timer: 2 + this.random(), flash: 0, orbitHit: -10, warnTime: 0, warnDuration: 0, attackFlash: 0, lastAttack: null, pendingAttack: null, attackIndex: 0, phase: 0, hidden: false, shielded: ENEMY_BEHAVIOR[type] === 'shield', mirror: 0, elite, role, bossArt: this.sector, stages: type === 'boss' ? (role === 'captain' ? 2 : 3) : 1, stageGuard: 0, leader: 0, offX: 0, offY: 0, arm: this.nextId % 2, ti: 20, dir: 1, ttl: 12, status: emptyStatus(), behaviorCD: 2 + this.combatRandom() * 2, action: '', actionTime: 0, actionAngle: a, targetX: 0, targetY: 0, prefix: elite ? ELITES[Math.floor(this.combatRandom() * ELITES.length)] : '' });
         if (e.prefix === 'swift')
             e.speed *= 1.55;
         if (e.prefix === 'armored') {
@@ -368,7 +418,7 @@ export class Simulation {
         if (crowd) {
             e.damage *= this.chapter?.id === 'atmosphere' ? .08 : .12;
             e.hp *= this.chapter?.id === 'village' ? .6 : this.chapter?.id === 'atmosphere' ? .2 : .3;
-            e.hp = Math.max(e.hp, def.hp * Math.max(0, (this.time - 120) / 90));
+            e.hp = Math.max(e.hp, def.hp * Math.max(0, (this.timeline - 120) / 90));
             e.maxHp = e.hp;
             e.speed = Math.max(85, e.speed);
         }
@@ -1233,13 +1283,21 @@ export class Simulation {
                 this.bonus += e.elite ? ECONOMY.eliteShards : e.role === 'middle' ? ECONOMY.middleShards : ECONOMY.bossShards;
                 this.shake = 8;
                 this.hitStop = e.type === 'boss' ? .11 : .04;
-                if (e.type === 'boss')
-                    this.slowMotion = .4;
+                if (e.type === 'boss') {
+                    this.slowMotion = e.role === 'final' ? 1.1 : .4;
+                    this.effect('blast', e.x, e.y, e.role === 'final' ? 360 : 180, '#ffc76d', 1);
+                }
                 const record = this.bossRecords.find(r => r.id === e.id);
                 if (record)
                     record.killed = this.time;
                 if (e.role === 'final') {
                     this.bossKilled = true;
+                    this.bossDefeatedAt = this.time;
+                    this.player.invul = Math.max(this.player.invul, 3);
+                    if (this.expedition) {
+                        this.pendingLevels = this.pendingChests = 0;
+                        this.chestQueue = [];
+                    }
                     this.blackout = 0;
                     this.hazards = [];
                     for (const b of this.bullets)
@@ -1258,12 +1316,12 @@ export class Simulation {
                 this.status = 'won';
             return;
         }
-        if (this.status !== 'playing' || this.pendingLevels || this.pendingChests)
+        if (this.status !== 'playing' || !this.bossKilled && (this.pendingLevels || this.pendingChests))
             return;
         if (!Number.isFinite(dt) || dt <= 0)
             return;
         dt = Math.min(dt, .1);
-        this.time = Math.min(660, this.time + dt);
+        this.time = Math.min(this.expedition ? 528 : 660, this.time + dt);
         const p = this.player, s = this.attributes, m = moveVector(input.x, input.y);
         this.stepAttributes = s;
         this.particleMinimum = 0;
@@ -1308,8 +1366,8 @@ export class Simulation {
                 p.y = o.y + dy / (d || 1) * (r + .5);
             }
         }
-        if (!this.bossKilled || this.time < 600) {
-            this.spawnBudget += waveAt(this.time) * this.mode.spawn * this.spawnBoost * (this.bossSpawned ? .85 : 1) * dt;
+        if (!this.bossKilled) {
+            this.spawnBudget += waveAt(this.timeline) * this.mode.spawn * this.spawnBoost * (this.bossSpawned ? .85 : 1) * dt / (this.expedition ? CHAPTER_RATE : 1);
             while (this.spawnBudget >= 1) {
                 const types = SECTORS[this.sector].types;
                 const type = this.time < 35 ? 'rusher' : types[Math.floor(this.random() * Math.min(types.length, 1 + Math.floor(this.time / 65)))];
@@ -1324,13 +1382,17 @@ export class Simulation {
                 }
                 this.spawnBudget--;
             }
-            const encounter = BOSS_ENCOUNTERS[this.encounterIndex];
+            const encounter = this.encounters[this.encounterIndex];
+            if (encounter && this.time >= encounter.at - 2.5 && this.bossWarning !== this.encounterIndex) {
+                this.bossWarning = this.encounterIndex;
+                this.emit('bossWarning', p.x, p.y, encounter.role === 'final' ? 1 : 0);
+            }
             if (encounter && this.time >= encounter.at) {
                 const e = this.spawn('boss', p.x + 220, p.y - 120, encounter.role);
                 if (e) {
                     e.bossArt = encounter.art < 0 ? this.sector : encounter.art;
                     e.stages = encounter.stages;
-                    e.hp = e.maxHp = encounter.hp * this.mode.hp * (1 + this.sector * .12) * (this.chapter?.bossHp ?? 1);
+                    e.hp = e.maxHp = encounter.hp * this.mode.hp * (1 + this.sector * .12) * (this.chapter?.bossHp ?? 1) * (this.expedition ? CHAPTER_RATE : 1);
                     e.xp = encounter.role === 'final' ? 900 : encounter.role === 'middle' ? 400 : 180;
                     e.r = encounter.role === 'captain' ? 52 : encounter.role === 'middle' ? 66 : 78;
                     this.bossRecords.push({ id: e.id, art: e.bossArt, role: e.role, spawned: this.time, killed: null, phases: [], hp: e.maxHp });
@@ -1343,9 +1405,11 @@ export class Simulation {
                     p.invul = Math.max(p.invul, 2);
                 }
             }
-            const swarm = SWARM_EVENTS[this.swarmIndex];
+            const swarm = swarmSchedule(this.expedition)[this.swarmIndex];
             if (swarm && this.time >= swarm.at) {
-                this.swarmUntil = this.time + (this.expedition ? 25 : swarm.duration);
+                this.swarmUntil = this.time + swarm.duration;
+                this.swarmStarted = this.time;
+                this.arrivalSites = [];
                 this.swarmIndex++;
                 this.emit('swarm');
                 for (let i = 0; i < swarm.count; i++) {
@@ -1360,21 +1424,22 @@ export class Simulation {
                 for (let i = 0; i < 7; i++)
                     this.spawn('galaxyDot', clamp(p.x + 450 + i * 24, 30, 4770), clamp(p.y - 140 + i * 18, 30, 3170));
         }
-        if (this.time >= this.nextBeacon && this.time < 500) {
+        if (this.time >= this.nextBeacon && this.timeline < 500) {
             if (!this.beacon)
                 this.beacon = { x: clamp(p.x + 250, 100, 4700), y: clamp(p.y + 150, 100, 3100), r: 30, hp: 130 + this.sector * 30, maxHp: 130 + this.sector * 30, flash: 0 };
-            this.nextBeacon += 100;
+            this.nextBeacon += 100 * (this.expedition ? CHAPTER_RATE : 1);
         }
-        if (this.time >= this.nextSupply && this.nextSupply <= 480) {
+        if (this.time >= this.nextSupply && this.nextSupply <= 480 * (this.expedition ? CHAPTER_RATE : 1)) {
             this.dropChest(clamp(p.x + 80, 50, 4750), clamp(p.y + 40, 50, 3150));
-            this.nextSupply += 120;
+            this.nextSupply += 120 * (this.expedition ? CHAPTER_RATE : 1);
         }
-        if (this.time >= this.nextElite && this.time < 530) {
+        if (this.time >= this.nextElite && this.timeline < 530) {
             this.spawn(CHAPTER_ENEMIES[this.sector][Math.floor(this.combatRandom() * 4)], undefined, undefined, '', true);
-            this.nextElite += 75;
+            this.nextElite += this.expedition ? 52 : 75;
         }
         if (this.expedition) {
-            this.xpCredit = Math.min(600, this.xpCredit + dt * (this.time < 12 ? 6 : this.time < 120 ? 10.5 : this.time < 300 ? 30 : this.time < 540 ? 68 : this.time < 600 ? 140 : 70));
+            this.xpCredit = Math.min(600, this.xpCredit + dt / CHAPTER_RATE * (this.timeline < 12 ? 6 : this.timeline < 120 ? 10.5 : this.timeline < 300 ? 30 : this.timeline < 540 ? 68 : this.timeline < 600 ? 140 : 70));
+            this.updateArrivals(dt);
             this.updateHorde(dt);
         }
         this.muzzleTime = Math.max(0, this.muzzleTime - dt);
@@ -1447,7 +1512,7 @@ export class Simulation {
                 g.x += dx / (d || 1) * travel;
                 g.y += dy / (d || 1) * travel;
             }
-            if (d < 20) {
+            if (d < 20 && !(this.expedition && this.bossKilled)) {
                 if (g.kind === 'heal')
                     p.hp = Math.min(p.maxHp, p.hp + g.value);
                 else
@@ -1457,7 +1522,7 @@ export class Simulation {
             }
         }
         for (let i = this.drops.length - 1; i >= 0; i--)
-            if (Math.hypot(this.drops[i].x - p.x, this.drops[i].y - p.y) < 38) {
+            if (!(this.expedition && this.bossKilled) && Math.hypot(this.drops[i].x - p.x, this.drops[i].y - p.y) < 38) {
                 this.queueChest(this.drops[i].rank ?? 0);
                 this.emit('chest', p.x, p.y, this.drops[i].rank ?? 0);
                 this.drops.splice(i, 1);
@@ -1482,7 +1547,7 @@ export class Simulation {
             if (f.life <= 0)
                 this.floaters.splice(i, 1);
         }
-        if (this.status === 'playing' && this.time >= 600 && this.bossKilled) {
+        if (this.status === 'playing' && this.bossKilled && this.time >= (this.expedition ? this.bossDefeatedAt + 1.2 : 600)) {
             if (this.expedition && this.chapter?.id === 'launch') {
                 this.launchAge = 0;
                 this.pendingChests = this.pendingLevels = 0;
@@ -1491,7 +1556,7 @@ export class Simulation {
             else
                 this.status = 'won';
         }
-        if (this.status === 'playing' && this.time >= 660) {
+        if (this.status === 'playing' && this.time >= (this.expedition ? 528 : 660)) {
             this.lastDamageCause = 'timeout';
             this.status = 'lost';
         }

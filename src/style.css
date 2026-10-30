@@ -85,3 +85,21 @@ button,select,summary,input[type=range],input[type=checkbox]{min-height:44px;min
 .special-gate{font-size:12px;color:#b19c77;padding:8px 0}.hero-crew{flex-shrink:0}
 
 .chapters-dialog .dialog-head{position:sticky;top:-18px;z-index:3;background:#202535;padding:10px 0}
+
+.in-combat .mission-box{transform:none;top:calc(28px + var(--safe-top,0px));left:310px;padding:2px 5px;min-width:150px}
+.in-combat .run-progress{position:fixed;top:calc(8px + var(--safe-top,0px));left:18px;right:18px;width:auto;height:7px;margin:0;overflow:visible;background:#161b2c;border:1px solid #69728b}
+.run-progress #run-fill{height:100%;display:block;background:#8acdb2;max-width:100%}
+.boss-marker{position:absolute;top:-8px;transform:translateX(-50%);font-size:17px;color:#e8b776;line-height:20px;text-shadow:1px 1px #111}
+.boss-marker.final{color:#ee9ed1;font-size:21px}.boss-marker.cleared{color:#72e9ae}.boss-marker.active{color:#fff}
+#run-percent{position:absolute;top:9px;right:180px;font-size:10px;color:#dce9e5}
+#incoming,#toast{max-width:calc(100vw - 32px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.in-combat #incoming,.in-combat #toast{position:fixed;top:calc(30px + var(--safe-top,0px));left:50%;bottom:auto;transform:translateX(-50%);min-width:0;width:max-content;max-width:calc(100vw - 32px);margin:0;padding:4px 12px;min-height:0;border:1px solid #bfa57b;background:#171c2deb;font-size:12px;line-height:18px;z-index:25;animation:edge-notice 1.5s both}
+#incoming #incoming-count{font-size:inherit;line-height:inherit;display:inline}#incoming #incoming-kind:empty{display:none}
+.in-combat #incoming.final{border-color:#e8a5d9;color:#f4c6e9}
+@keyframes edge-notice{0%{opacity:0;translate:0 -5px}13.333%{opacity:1;translate:0 0}80%{opacity:1;translate:0 0}100%{opacity:0;translate:0 -4px}}
+.in-combat #bossbar{top:calc(86px + var(--safe-top,0px));left:50%;width:min(620px,calc(100% - 36px));padding:4px 8px;border-width:2px;background:#1b2030ee;z-index:12}
+#bossbar>div:first-child{margin-bottom:4px;display:flex;justify-content:space-between;gap:8px;font-size:14px}#bossbar .meter{height:13px}#bossbar.final{border-color:#dc8bbf}#bossbar.final #boss-fill{background:#e090bf}#boss-phase{font-size:10px}
+.in-combat #danger-label{top:calc(140px + var(--safe-top,0px));left:12px;transform:none;width:18px;overflow:hidden;font-size:0;pointer-events:none}.in-combat #danger-label::before{content:'!';font-size:14px;color:#ffd781}
+.in-combat #objective-label{top:calc(140px + var(--safe-top,0px));bottom:auto;left:auto;right:14px;font-size:15px;transform:none}
+.in-combat #cue-skip{position:fixed;top:calc(66px + var(--safe-top,0px));right:12px;bottom:auto;font-size:9px;padding:2px 5px;min-height:22px}
+@media(max-width:720px){#run-percent{right:64px}.in-combat .mission-box{left:12px;top:calc(55px + var(--safe-top,0px));min-width:0;max-width:46%}.in-combat .mission-box h2{font-size:11px}.in-combat #incoming{font-size:11px}.in-combat #bossbar{top:calc(99px + var(--safe-top,0px))}.in-combat #boss-name{font-size:11px}.in-combat #boss-phase{font-size:8px}.in-combat #upgrade-chips{top:calc(164px + var(--safe-top,0px))}.in-combat .minimap-wrap{top:calc(161px + var(--safe-top,0px))}}
