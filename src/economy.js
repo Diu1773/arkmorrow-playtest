@@ -31,7 +31,8 @@ export function pull(s, count, random) {
 export function chestRates(sector, boss = true) { const c = Math.max(0, Math.min(5, sector)), chaos = boss && c >= 3 ? (c - 2) * .0005 : 0; return [.34 - c * .035, .4 - c * .01, .22 + c * .025, .035 + c * .016, .005 + c * .004 - chaos, chaos]; }
 export function awardRun(s, r, random, totals) {
     const first = r.won && !s.cleared.includes(r.sector), factor = 1 + r.sector * .35;
-    const gold = Math.floor((r.time * ECONOMY.goldTime + r.kills * ECONOMY.goldKills) * factor), blueprints = slotRecord(Math.floor((r.time / 75 + r.kills / 200) * factor)), qualifiedRuns = s.qualifiedRuns + Number(r.time >= 60);
+    const rewardKills = r.rewardKills ?? r.kills;
+    const gold = Math.floor((r.time * ECONOMY.goldTime + rewardKills * ECONOMY.goldKills) * factor), blueprints = slotRecord(Math.floor((r.time / 75 + rewardKills / 200) * factor)), qualifiedRuns = s.qualifiedRuns + Number(r.time >= 60);
     const chests = (r.bosses ?? 0) + (first ? ECONOMY.firstChests : 0), achievements = [];
     for (const [key, met] of [['first-win', r.won], ['five-runs', qualifiedRuns >= 5], ['thousand-kills', totals.kills >= 1000], ['first-evolution', totals.evolutions >= 1]])
         if (met && !s.achievements.includes(key))

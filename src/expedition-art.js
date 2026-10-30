@@ -1,4 +1,4 @@
-import { crewArt, CREW } from './crew.js';
+import { crewFrame, foeFrame, floorTile } from './field-art.js';
 import { LOCAL_ENEMIES } from './chapters.js';
 import { TrialScene } from './scenes.js';
 import { drawScene } from './scene-art.js';
@@ -10,61 +10,17 @@ function disk(c, x, y, r, color, flat = 1) { c.fillStyle = color; for (let dy = 
     const dx = Math.floor(Math.sqrt(Math.max(0, r * r - (dy / flat) ** 2)));
     c.fillRect(Math.round(x) - dx, Math.round(y + dy), dx * 2 + 1, 1);
 } }
-export function groundCrew(id, dir = 0, frame = 0, flash = false) {
-    const key = `crew:${id}:${dir}:${frame}:${flash}`;
-    if (cache.has(key))
-        return cache.get(key);
-    const ca = canvas(40), c = ca.getContext('2d'), art = crewArt(id, dir, frame === 3 ? 0 : frame);
-    const colors = { a: '#4a4b61', H: '#e1d8b5', W: CREW.find(x => x.id === id).color, v: '#426075', E: '#c4c8b7', B: '#657182', R: '#91a2a3', G: '#7f925e' };
-    const bob = frame === 1 || frame === 3 ? 1 : 0;
-    for (let y = 0; y < art.rows.length; y++)
-        for (let x = 0; x < art.rows[y].length; x++)
-            if (art.palette[art.rows[y][x]]) {
-                const color = flash ? '#fff4dc' : colors[art.rows[y][x]];
-                block(c, x * 2 + 4, y * 2 + 2 + bob, 2, 2, color ?? '#a68d68');
-            }
-    // Separate boots and sleeve highlights keep the gait readable at native scale.
-    if (frame === 3) {
-        c.clearRect(9, 29, 21, 8);
-        block(c, 11, 30, 6, 5, flash ? '#fff4dc' : '#4a4b61');
-        block(c, 24, 31, 6, 4, flash ? '#fff4dc' : '#657182');
-    }
-    if (!flash) {
-        block(c, 12, 17, 4, 2, '#e4b56c');
-        block(c, 20, 24, 4, 2, '#c4c8b7');
-    }
-    cache.set(key, ca);
-    return ca;
-}
-const grids = {
-    slime: '....ssss..../..sshhhsss../.shhhhhhhhs./shhEEhhEEhhs/shhDDhhDDhhs/.ssssssssss./..ss..ss..ss',
-    invader: '....ssss..../...shhhhhs../..shEEhEEhs./...shhhhhs../..ssssssss../.sshhsshhss./..shh..hhs../..sss..sss..',
-    guard: '..ssssssss../.shhhsshhhs./shhEEssEEhhs/shhhhhhhhhhs/sssssbbsssss/.shhsbbshhs./..sssbbsss../...ssbbss...',
-    pod: '....ss....../...shhs...../..shhhhss.../.shhEEhhhs../.shhhhhhhhs./.shbbbbbbhs./.ssssssssss./..ss....ss..',
-    jelly: '...ssssss.../..shhhhhhs../.shhEEhEEhs./shhhhhhhhhhs/.ssssssssss./..hh.h.hh.../..hh.h.hh.../...h...h....',
-    sparkling: '.....ss...../....shs...../..sshhsss.../.shhEEhhhs../..sshhsss.../....hhs...../...hhs....../..sss.......',
-    jet: '.....ss...../....shhs..../.ssshhsss.../shhhhhhhhhhs/ssssEEssssss/...shhhs..../..sshhss..../..ss..ss....',
-    weatherBomb: '...ssssss.../..shhhhhhs../.shhEEhEEhs./.shhhhhhhhs./..shhhhhhs../...ssssss.../.....bb...../....bbbb..../.....ss.....',
-    fieldSlime: '...ss..ss.../..shhsshhss./.shhhhhhhhs./shhEEhhEEhhs/shhhhhhhhhhs/.ssssssssss./..ss....ss..',
-    worm: '..ss......../.shhs....ss./shEEhs..shhs/.shhhssshhs./..shhhhhhhs./...sssssss..',
-    scarecrow: '....bbbb..../..bbbbbbbb../...sEEs...../..ssssss..../hhhhsshhhhhh/...shhs...../...shhs...../..sshhss..../....bb....../....bb......',
-    gnat: 'hh......hh../hhh.sss.hhh./.hhshhhs.hh./...sEEs...../...shhs...../....ss......',
-};
+export const groundCrew = crewFrame;
 export function earthEnemy(id, phase = 0, flash = false) {
+    if (!id.includes('mini') && !['launch', 'atmosphere', 'village'].includes(id))
+        return foeFrame(id, phase % 2, flash);
     const key = 'enemy:' + id + phase + flash;
     if (cache.has(key))
         return cache.get(key);
     const base = id.split('-mini-')[0], boss = ['launch', 'atmosphere', 'village'].includes(base), ca = canvas(boss ? 64 : 32), c = ca.getContext('2d');
     const tint = id === 'atmosphere' ? '#8ca5af' : id === 'village' ? '#7f925e' : '#a68d68';
-    if (!boss) {
-        const rows = (grids[id] ?? grids.slime).split('/'), color = ['jelly', 'sparkling', 'jet', 'weatherBomb'].includes(id) ? '#75918a' : ['slime', 'fieldSlime', 'worm', 'gnat'].includes(id) ? '#7f925e' : '#a27d70';
-        for (let y = 0; y < rows.length; y++)
-            for (let x = 0; x < rows[y].length; x++) {
-                const k = rows[y][x], p = { s: '#34354b', h: color, E: '#e4b56c', D: '#202535', b: '#806b56' };
-                if (p[k])
-                    block(c, 4 + x * 2, 4 + y * 2, 2, 2, p[k]);
-            }
-    }
+    if (!boss)
+        return foeFrame(id, phase % 2, flash);
     else if (id.includes('-mini-')) {
         const second = id.endsWith('1');
         if (base === 'launch') {
@@ -169,11 +125,6 @@ export function earthEnemy(id, phase = 0, flash = false) {
     cache.set(key, ca);
     return ca;
 }
-function tile(id, variant) { const key = `tile:${id}:${variant}`; if (cache.has(key))
-    return cache.get(key); const ca = canvas(16), c = ca.getContext('2d'), grass = id === 'village'; block(c, 0, 0, 16, 16, grass ? '#49634d' : '#655244'); for (let i = 0; i < 20; i++) {
-    const x = (i * 7 + variant * 3) % 16, y = (i * 11 + variant * 5) % 16;
-    block(c, x, y, 2, i % 3 ? 1 : 2, grass ? (i % 2 ? '#607751' : '#3b5150') : (i % 2 ? '#806b56' : '#4f494b'));
-} cache.set(key, ca); return ca; }
 export function drawEarth(c, s, w, h, cx, cy, u, t, low = false) {
     const id = s.chapter.id, X = (x) => Math.round(w / 2 + (x - cx) * u), Y = (y) => Math.round(h / 2 + (y - cy) * u);
     if (id === 'atmosphere') {
@@ -214,19 +165,22 @@ export function drawEarth(c, s, w, h, cx, cy, u, t, low = false) {
         }
         return;
     }
-    const size = Math.max(4, Math.round(48 * u)), ox = X(0) % size, oy = Y(0) % size;
+    const size = Math.max(32, Math.round(144 * u)), ox = X(0) % size, oy = Y(0) % size;
     for (let y = -size; y < h + size; y += size)
         for (let x = -size; x < w + size; x += size) {
             const tx = Math.floor((cx + (x - w / 2) / u) / 48), ty = Math.floor((cy + (y - h / 2) / u) / 48), v = Math.abs(tx * 13 + ty * 7) % 4;
-            c.drawImage(tile(id, v), x + ox, y + oy, size, size);
+            c.drawImage(floorTile(id, v), x + ox, y + oy, size, size);
         }
     if (id === 'launch') {
-        block(c, X(2260), 0, Math.round(280 * u), h, '#4f494b');
+        block(c, X(2260), 0, Math.round(280 * u), h, '#252d3d');
         for (let y = Y(0) % Math.max(6, Math.round(110 * u)); y < h; y += Math.max(6, Math.round(110 * u)))
-            block(c, X(2395), y, Math.max(2, Math.round(10 * u)), Math.round(50 * u), '#b19c77');
+            block(c, X(2395), y, Math.max(2, Math.round(10 * u)), Math.round(50 * u), '#4b5e70');
     }
     for (const ter of s.terrain) {
-        const x = X(ter.x), y = Y(ter.y), r = Math.round(ter.r * u), color = ter.kind === 'field' ? '#806b56' : ter.kind === 'puddle' ? '#526a68' : '#a68d68';
+        const x = X(ter.x), y = Y(ter.y), r = Math.round(ter.r * u);
+        if (x + r < 0 || y + r < 0 || x - r > w || y - r > h)
+            continue;
+        const color = ter.kind === 'field' ? '#343b32' : ter.kind === 'puddle' ? '#173b42' : '#302b32';
         disk(c, x, y, r, color, .6);
         for (let i = 0; i < 36; i++) {
             const a = i / 36 * Math.PI * 2, rr = r + (i % 3 - 1) * 3;
@@ -265,26 +219,6 @@ export function drawEarth(c, s, w, h, cx, cy, u, t, low = false) {
             const x = (i * 157 + Math.floor(t * 5) - cx * .02 + w * 100) % w, y = (i * 73 + Math.sin(t + i) * 3 - cy * .02 + h * 100) % h;
             block(c, x, y, 2, 1, id === 'village' ? '#7f925e' : '#a68d68');
         }
-    // The distant skyline occupies a small strip outside the playfield centre.
-    block(c, 0, 0, w, 31, '#426075');
-    disk(c, w - 35, 13, 12, '#c4c8b7');
-    disk(c, w - 31, 10, 11, '#8ca5af');
-    for (let i = 0; i < 10; i++)
-        block(c, (i * 53 - cx * .008 + w * 100) % w, 23 - i % 3 * 3, 40, 11, '#34354b');
-    if (id === 'launch') {
-        const x = w - 68 - Math.round(Math.sin(cx * .001) * 4);
-        block(c, x - 12, 7, 4, 27, '#657182');
-        block(c, x + 8, 7, 4, 27, '#657182');
-        block(c, x - 10, 12, 20, 2, '#91a2a3');
-        block(c, x - 2, 3, 8, 27, '#c4c8b7');
-        block(c, x, 0, 4, 5, '#a27d70');
-        block(c, x - 5, 25, 14, 5, '#806b56');
-    }
-    for (let i = 0; i < 2; i++) {
-        const x = (t * 17 + i * 179) % w, y = 2 + i * 8;
-        block(c, x, y, 8, 1, '#a68d68');
-        block(c, x + 8, y + 1, 2, 2, '#e4b56c');
-    }
 }
 export function drawProps(c, s, X, Y, u, t) {
     for (const o of s.props) {
@@ -306,9 +240,9 @@ export function drawProps(c, s, X, Y, u, t) {
             disk(c, x - 5, y - r * 2.1, r * .62, '#607751');
         }
         else if (o.kind === 'house' || o.kind === 'hangar') {
-            block(c, x - r, y - r * 1.6, r * 2, r * 1.6, '#a68d68');
-            block(c, x - r - 4, y - r * 2.1, r * 2 + 8, r * .65, o.kind === 'house' ? '#79534e' : '#657182');
-            block(c, x - r, y - r * 2.1, r * 2, 3, '#c1977a');
+            block(c, x - r, y - r * 1.6, r * 2, r * 1.6, '#252d3d');
+            block(c, x - r - 4, y - r * 2.1, r * 2 + 8, r * .65, o.kind === 'house' ? '#473257' : '#354256');
+            block(c, x - r, y - r * 2.1, r * 2, 3, '#4b5e70');
             block(c, x - 4, y - r * .6, 8, r * .6, '#34354b');
             for (const d of [-.6, .5])
                 block(c, x + r * d, y - r * 1.2, 6, 7, '#e4b56c');
@@ -342,18 +276,13 @@ export function drawProps(c, s, X, Y, u, t) {
     }
 }
 export function drawEarthEnemy(c, s, e, x, y, size) {
-    const id = e.type === 'boss' ? s.chapter.id + (e.role === 'final' ? '' : `-mini-${Math.abs(e.bossArt - 6) % 2}`) : e.type;
-    if (!LOCAL_ENEMIES[s.chapter?.id ?? ''])
+    const local = !!LOCAL_ENEMIES[s.chapter?.id ?? ''];
+    if (!local)
         return false;
-    if (e.type === 'pod' && e.age < .7) {
-        disk(c, x, y, Math.max(3, size * .3), '#34354b', .3);
-        y -= size * (1 - e.age / .7) * 2;
-    }
-    const img = earthEnemy(id, e.phase, e.flash > 0 || e.attackFlash > 0), sy = e.type === 'boss' ? size : Math.max(16, size);
-    c.save();
-    const squash = e.warnTime > 0 ? .82 : 1;
-    c.drawImage(img, Math.round(x - sy / 2), Math.round(y - sy * squash / 2), sy, Math.round(sy * squash));
-    c.restore();
+    const id = e.type === 'boss' ? s.chapter.id + (e.role === 'final' ? '' : `-mini-${Math.abs(e.bossArt - 6) % 2}`) : e.type;
+    const img = e.type === 'boss' ? earthEnemy(id, e.phase, e.flash > 0 || e.attackFlash > 0) : foeFrame(id, Math.floor(e.age * 7) % 2, e.flash > 0 || e.attackFlash > 0, e.elite);
+    const sy = e.type === 'boss' ? Math.max(64, size) : img.height, sw = e.type === 'boss' ? sy : img.width, squash = e.warnTime > 0 ? .82 : 1;
+    c.drawImage(img, Math.round(x - sw / 2), Math.round(y - sy / 2), sw, Math.round(sy * squash));
     return true;
 }
 let launch;

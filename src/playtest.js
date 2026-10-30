@@ -31,7 +31,7 @@ export class FrameStats {
         this.total += ms;
         this.windowTime += ms;
         this.windowCount++;
-        if (this.windowCount >= 180) {
+        if (this.windowCount >= 180 || this.windowTime >= 2000) {
             if (this.windowTime / this.windowCount > 24)
                 this.autoLow = true;
             this.windowCount = this.windowTime = 0;

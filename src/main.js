@@ -1,3 +1,4 @@
+import { fieldScale } from './horde.js';
 import { CREW } from './crew.js';
 import { chapterDef, crewUnlocked, LOCAL_BOSSES, localBossName } from './chapters.js';
 import { groundCrew } from './expedition-art.js';
@@ -594,7 +595,7 @@ function updateHUD() {
     perf.hidden = !showPerf;
     perf.textContent = `${fps.toFixed(0)} FPS  ${sim.enemies.length} / ${sim.shots.length + sim.bullets.length}`;
 }
-function resize() { V.w = window.innerWidth; V.h = window.innerHeight; V.dpr = Math.min(window.devicePixelRatio || 1, 1.5); V.scale = Math.max(.5, Math.min(V.w / 1120, V.h / 720, 1.4)); cosmos.resize(V.w, V.h, V.dpr, 'auto'); }
+function resize() { V.w = window.innerWidth; V.h = window.innerHeight; V.dpr = Math.min(window.devicePixelRatio || 1, 1.5); V.scale = fieldScale(V.w, V.h); cosmos.resize(V.w, V.h, V.dpr, 'auto'); }
 function inputState() {
     let x = Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft')), y = Number(keys.has('KeyS') || keys.has('ArrowDown')) - Number(keys.has('KeyW') || keys.has('ArrowUp'));
     x += joy.x;
@@ -685,7 +686,7 @@ function pollPad(now) {
     padBefore = pressed;
 }
 function advance(dt) { if (!sim || view !== 'playing' || stressPreview)
-    return; sim.step(dt, inputState()); cosmos.consumeEvents(sim.events); audio.consume(sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }); audio.combat(sim.sector, sim.time, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0)); if (sim.events.some(e => e.kind === 'boss')) {
+    return; sim.viewWidth = V.w / V.scale; sim.viewHeight = V.h / V.scale; sim.step(dt, inputState()); cosmos.consumeEvents(sim.events); audio.consume(sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }); audio.combat(sim.sector, sim.time, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0)); if (sim.events.some(e => e.kind === 'boss')) {
     document.getElementById('cue-skip')?.remove();
     app.insertAdjacentHTML('beforeend', btn('skip-cue', tr('skipCue'), 'cue-skip', 'id="cue-skip"'));
 } sim.events.length = 0; if (sim.status !== 'playing') {
@@ -888,6 +889,8 @@ document.addEventListener('visibilitychange', () => { resetInput(); if (document
 else if (view !== 'pause')
     audio.setScene(view === 'settings' && sim ? 'pause' : view); });
 const canvas = document.querySelector('#world');
+canvas.addEventListener('webglcontextlost', () => { if (view === 'playing')
+    action('pause'); });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('pointerdown', e => { if (view !== 'playing')
     return; audio.unlock(); if (e.pointerType === 'touch') {

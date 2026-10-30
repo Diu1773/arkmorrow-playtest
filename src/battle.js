@@ -3,7 +3,8 @@ import { ELEMENTS, WEAPONS } from './data.js';
 import { clamp, weaponStats } from './core.js';
 import { REACTIONS, reactionFor } from './combat-rules.js';
 import { combatCopy } from './i18n.js';
-export const elementOf = (weapon) => WEAPONS.find(w => w.id === weapon)?.element ?? 'physical';
+const weaponElements = Object.fromEntries(WEAPONS.map(w => [w.id, w.element ?? 'physical']));
+export const elementOf = (weapon) => weaponElements[weapon] ?? 'physical';
 export function impact(sim, x, y, r, damage, weapon, push = 0) {
     sim.areaDamage(x, y, r, damage, push, weapon);
     sim.effect('blast', x, y, r, ELEMENTS[elementOf(weapon)].color, .55, 0, 0, 0, false, weapon);
@@ -201,6 +202,7 @@ export function updateBattleEffects(sim, dt) {
                         n.x += (n.x - e.x) / (d || 1) * 24;
                         n.y += (n.y - e.y) / (d || 1) * 24;
                     }
+                    sim.hash.moved(n);
                 });
                 sim.hitBeacon(e.x, e.y, radius, e.damage * .5);
                 if (e.kind === 'resonance' || e.kind === 'quake') {
@@ -215,8 +217,8 @@ export function updateBattleEffects(sim, dt) {
             if (e.kind === 'gravity')
                 impact(sim, e.x, e.y, e.radius, e.damage * 2, 'blackhole');
             if (e.kind === 'splitwarn') {
-                sim.spawn('mini', e.x - 18, e.y);
-                sim.spawn('mini', e.x + 18, e.y);
+                sim.spawn('mini', e.x - 18, e.y, '', false, e.repeat);
+                sim.spawn('mini', e.x + 18, e.y, '', false, e.repeat);
             }
             sim.effectPool.remove(i);
         }

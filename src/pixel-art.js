@@ -156,8 +156,10 @@ export function pixels(id) {
     }
     if (id.startsWith('ship:'))
         return shipArt[id.slice(5)] ?? shipArt.aster;
-    if (id.startsWith('enemy:'))
-        return enemyArt[id.slice(6)] ?? enemyArt.rusher;
+    if (id.startsWith('enemy:')) {
+        const name = id.slice(6), art = enemyArt[name] ?? enemyArt.rusher, family = ['shield', 'healer', 'orbiter'].includes(name) ? 0 : ['wing', 'wingLeader', 'dodger'].includes(name) ? 1 : ['mini', 'swarm', 'rusher', 'burrower', 'blinker'].includes(name) ? 2 : 3, colors = [['#426b9e', '#628ed5', '#a5b7df'], ['#9b5748', '#e6aa4b', '#ffe6a3'], ['#473257', '#76529a', '#aa75dd'], ['#553e46', '#9b5748', '#e68a4b']][family];
+        return { ...art, palette: { ...art.palette, 'a': colors[1], 'h': colors[2], 'r': colors[1], 's': colors[0], '4': colors[0], '5': colors[1], '6': colors[2] } };
+    }
     if (id.startsWith('boss:')) {
         const [, index, phase] = id.split(':'), art = bossArt[Number(index) % 10], stage = Number(phase) || 0;
         return stage ? { rows: art.rows.map((r, y) => stage > 1 && y % 7 === 3 ? r.replace(/3/g, '1') : r), palette: { ...art.palette, '5': stage === 1 ? '#f077b1' : '#ef724a', '6': stage === 1 ? '#ffe9fb' : '#fff1c5' } } : art;

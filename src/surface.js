@@ -114,5 +114,8 @@ export function hitProps(s, x, y, r, damage) {
         }
     }
 }
-export function localSpawn(s, type) { const id = s.chapter?.id ?? '', list = LOCAL_ENEMIES[id]; if (type === 'mini' && list)
-    return id === 'village' ? 'gnat' : id === 'launch' ? 'invader' : 'jelly'; return list && type !== 'boss' && type !== 'decoy' ? list[Math.floor(s.combatRandom() * Math.min(list.length, 1 + Math.floor(s.time / 55)))] : type; }
+export function localSpawn(s, type, crowd = false) { const id = s.chapter?.id ?? '', list = LOCAL_ENEMIES[id]; if (type === 'mini' && list)
+    return id === 'village' ? 'gnat' : id === 'launch' ? 'invader' : 'jelly'; if (crowd && list) {
+    const n = s.combatRandom();
+    return list[n < .58 ? 0 : n < .83 ? 1 : n < .93 ? 2 : 3];
+} return list && type !== 'boss' && type !== 'decoy' ? list[Math.floor(s.combatRandom() * Math.min(list.length, 1 + Math.floor(s.time / 55)))] : type; }

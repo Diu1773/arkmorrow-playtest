@@ -86,7 +86,7 @@ export function refund(save) { let amount = 0; for (const m of META)
     amount += m.cost * save.meta[m.id] * (save.meta[m.id] + 1) / 2; return { ...save, shards: save.shards + amount, meta: defaultSave().meta }; }
 export const reward = shardReward;
 export function settle(save, result) { if (save.settled.includes(result.id))
-    return save; const r = { ...result, time: int(result.time, 660), kills: int(result.kills), sector: int(result.sector, 7), bosses: int(result.bosses, 5) }; const totals = { runs: save.runs + 1, kills: save.kills + r.kills, evolutions: save.evolutions + int(r.evolutions) }; let seed = 0; for (const c of r.id)
+    return save; const r = { ...result, time: int(result.time, 660), kills: int(result.kills), rewardKills: result.rewardKills === undefined ? undefined : int(result.rewardKills), sector: int(result.sector, 7), bosses: int(result.bosses, 5) }; const totals = { runs: save.runs + 1, kills: save.kills + r.kills, evolutions: save.evolutions + int(r.evolutions) }; let seed = 0; for (const c of r.id)
     seed = Math.imul(seed, 31) + c.charCodeAt(0) | 0; return { ...save, ...totals, equipment: (() => { const firstSpecial = r.special && !save.specialCleared.includes(r.special); let e = awardRun(r.special ? { ...save.equipment, cleared: save.specialCleared.includes(r.special) ? [3] : [] } : save.equipment, r.special ? { ...r, sector: 3 } : r, rng(seed), totals); if (r.special)
         e = { ...e, cleared: save.equipment.cleared }; if (firstSpecial && r.won) {
         const uid = e.nextId;
@@ -164,13 +164,26 @@ export class SpatialHash {
     size;
     cells = new Map();
     buckets = [];
+    positions = new WeakMap();
+    epoch = 0;
+    displacement = 0;
     constructor(size = 96) { this.size = size; }
     key(x, y) { return (Math.floor(x / this.size) + 4096) * 8192 + Math.floor(y / this.size) + 4096; }
     clear() { for (const bucket of this.cells.values()) {
         bucket.length = 0;
         this.buckets.push(bucket);
-    } this.cells.clear(); }
+    } this.cells.clear(); this.epoch++; this.displacement = 0; }
     insert(item) {
+        let position = this.positions.get(item);
+        if (!position) {
+            position = { x: item.x, y: item.y, epoch: this.epoch };
+            this.positions.set(item, position);
+        }
+        else {
+            position.x = item.x;
+            position.y = item.y;
+            position.epoch = this.epoch;
+        }
         const key = this.key(item.x, item.y);
         let bucket = this.cells.get(key);
         if (!bucket) {
@@ -179,14 +192,55 @@ export class SpatialHash {
         }
         bucket.push(item);
     }
-    query(x, y, radius, visit) {
+    get movementSlack() { return this.displacement; }
+    moved(item) { const p = this.positions.get(item); if (p?.epoch === this.epoch)
+        this.displacement = Math.max(this.displacement, Math.sqrt((item.x - p.x) ** 2 + (item.y - p.y) ** 2) + 1e-7); }
+    nearest(x, y, radius, eligible = () => true) {
+        const size = this.size, cx = Math.floor(x / size), cy = Math.floor(y / size), a = Math.floor((x - radius) / size), b = Math.floor((x + radius) / size), c = Math.floor((y - radius) / size), d = Math.floor((y + radius) / size);
+        let best = radius * radius, bestKey = Infinity, target;
+        const visit = (i, j) => { if (i < a || i > b || j < c || j > d)
+            return; const key = (i + 4096) * 8192 + j + 4096, bucket = this.cells.get(key); if (!bucket)
+            return; for (const item of bucket) {
+            if (!eligible(item))
+                continue;
+            const distance = (item.x - x) ** 2 + (item.y - y) ** 2;
+            if (distance < best || target !== undefined && distance === best && key < bestKey) {
+                best = distance;
+                bestKey = key;
+                target = item;
+            }
+        } };
+        const limit = Math.max(cx - a, b - cx, cy - c, d - cy);
+        for (let ring = 0; ring <= limit; ring++) {
+            if (!ring)
+                visit(cx, cy);
+            else {
+                for (let i = cx - ring; i <= cx + ring; i++) {
+                    visit(i, cy - ring);
+                    visit(i, cy + ring);
+                }
+                for (let j = cy - ring + 1; j < cy + ring; j++) {
+                    visit(cx - ring, j);
+                    visit(cx + ring, j);
+                }
+            }
+            const outside = Math.min(x - (cx - ring) * size, (cx + ring + 1) * size - x, y - (cy - ring) * size, (cy + ring + 1) * size - y) - this.displacement;
+            if (outside > 0 && outside * outside > best)
+                break;
+        }
+        return target;
+    }
+    query(x, y, radius, visit, stop) {
         const a = Math.floor((x - radius) / this.size), b = Math.floor((x + radius) / this.size), c = Math.floor((y - radius) / this.size), d = Math.floor((y + radius) / this.size);
         for (let i = a; i <= b; i++)
             for (let j = c; j <= d; j++) {
                 const bucket = this.cells.get((i + 4096) * 8192 + j + 4096);
                 if (bucket)
-                    for (const item of bucket)
+                    for (const item of bucket) {
                         visit(item);
+                        if (stop?.())
+                            return;
+                    }
             }
     }
 }
