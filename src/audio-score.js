@@ -60,7 +60,7 @@ export function composeBar(id, bar, intensity) {
     }
     return notes;
 }
-export const SFX_IDS = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'kill', 'pickup', 'crystal', 'hurt', 'warning', 'level', 'evolve', 'chest', 'boss', 'clear', 'down', 'resonance', 'hover', 'click', 'back', 'buy', 'locked', 'start', 'air'];
+export const SFX_IDS = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'kill', 'pickup', 'crystal', 'hurt', 'warning', 'level', 'evolve', 'chest', 'boss', 'clear', 'down', 'resonance', 'hover', 'click', 'back', 'buy', 'locked', 'start', 'air', 'blast', 'wave', 'spark', 'gravity', 'field', 'prepare'];
 export const SAMPLE_RATE = 32000;
 export const frequency = (midi) => 440 * 2 ** ((midi - 69) / 12);
 function finish(data, rate, wet) {
@@ -128,8 +128,8 @@ export function synth(instrument, midi, duration, sampleRate = SAMPLE_RATE, vari
     }
     return finish(data, sampleRate, instrument === 'pad' ? .55 : instrument === 'arp' || instrument === 'lead' ? .8 : .12);
 }
-export function soundDuration(id) { return { level: 1.1, evolve: 1.8, chest: 1.9, boss: 1.7, clear: 2.1, down: 1.4, start: 1, resonance: .6, warning: .4, hurt: .25, air: .09, pickup: .19, crystal: .32, kill: .18, nova: .32, mine: .28, missile: .23 }[id] ?? .14; }
-const pitches = { pulse: 40, orbit: 37, missile: 30, chain: 48, laser: 39, mine: 28, fan: 43, nova: 25, kill: 35, pickup: 72, crystal: 60, hurt: 31, warning: 48, level: 43, evolve: 38, chest: 41, boss: 26, clear: 43, down: 30, resonance: 33, hover: 45, click: 40, back: 36, buy: 43, locked: 30, start: 36, air: 24 };
+export function soundDuration(id) { return { prepare: .12, blast: .48, wave: .55, spark: .16, gravity: .65, field: .24, level: 1.1, evolve: 1.8, chest: 1.9, boss: 1.7, clear: 2.1, down: 1.4, start: 1, resonance: .6, warning: .4, hurt: .25, air: .09, pickup: .19, crystal: .32, kill: .18, nova: .32, mine: .28, missile: .23 }[id] ?? .14; }
+const pitches = { prepare: 43, blast: 23, wave: 27, spark: 48, gravity: 25, field: 32, pulse: 40, orbit: 37, missile: 30, chain: 48, laser: 39, mine: 28, fan: 43, nova: 25, kill: 35, pickup: 72, crystal: 60, hurt: 31, warning: 48, level: 43, evolve: 38, chest: 41, boss: 26, clear: 43, down: 30, resonance: 33, hover: 45, click: 40, back: 36, buy: 43, locked: 30, start: 36, air: 24 };
 export function synthSound(id, variant, sampleRate = SAMPLE_RATE) {
     const duration = soundDuration(id), data = new Float32Array(Math.ceil(duration * sampleRate)), long = duration >= 1, f = frequency(pitches[id] + (variant - 2) * .24);
     let noise = 1709 + variant * 7919, low = 0, body = 0, sub = 0;
@@ -139,6 +139,19 @@ export function synthSound(id, variant, sampleRate = SAMPLE_RATE) {
         const white = noise / 2147483648;
         const cutoff = id === 'air' ? 450 : id === 'chain' ? 2300 : 1100 * Math.exp(-t * 18) + 150;
         low += (1 - Math.exp(-2 * Math.PI * cutoff / sampleRate)) * (white - low);
+        if (id === 'gravity') {
+            const p = t / duration, env = Math.sin(p * Math.PI) ** .8;
+            data[i] = (Math.sin(t * (42 + 70 * p * p) * Math.PI * 2) * .35 + low * .28) * env;
+            continue;
+        }
+        if (id === 'wave') {
+            data[i] = (Math.sin(t * 62 * Math.PI * 2 + Math.sin(t * 18) * 2) * .35 + low * .08) * Math.sin(Math.PI * t / duration) * Math.exp(-t * 3);
+            continue;
+        }
+        if (id === 'spark') {
+            data[i] = ((white - low) * .65 + Math.sin(t * 1800 * Math.PI * 2) * .12) * Math.exp(-t * 32) * (Math.sin(t * 270) > .1 ? 1 : .2);
+            continue;
+        }
         if (id === 'air') {
             data[i] = low * .12 * Math.sin(Math.PI * t / duration) ** 2;
             continue;

@@ -1,12 +1,7 @@
+import { rankCopy } from './i18n.js';
 import { ECONOMY } from './economy.js';
 export const SLOTS = ['weapon', 'helmet', 'suit', 'gloves', 'boots', 'pack'];
-export const RANKS = [
-    { ko: '노말', en: 'Normal', color: '#a8afb8', max: 10 },
-    { ko: '고급', en: 'Fine', color: '#87cf78', max: 20 },
-    { ko: '희귀', en: 'Rare', color: '#79b8f2', max: 30 },
-    { ko: '에픽', en: 'Epic', color: '#bd82ee', max: 40 },
-    { ko: '레전드리', en: 'Legendary', color: '#f6c454', max: 50 },
-];
+export const RANKS = rankCopy.map((r, n) => ({ ...r, max: (n + 1) * 10 }));
 export const GEAR = [
     { id: 'pulse-kit', slot: 'weapon', ko: 'PULSE 탐사총', en: 'PULSE Kit', family: 'pulse', attack: .16, hp: 0, armor: 0, traits: ['linkedShot', 'bossDamage', 'linkedPower'], variant: 0 },
     { id: 'orbit-kit', slot: 'weapon', ko: 'ORBITER 조종기', en: 'ORBITER Rig', family: 'orbit', attack: .16, hp: 0, armor: 0, traits: ['linkedShot', 'bossDamage', 'linkedPower'], variant: 1 },
@@ -21,6 +16,7 @@ export const GEAR = [
     { id: 'moon-boots', slot: 'boots', ko: '달걸음 부츠', en: 'Moon Boots', attack: 0, hp: 10, armor: .2, traits: ['lowSpeed', 'dashHaste', 'lastShield'], variant: 0 },
     { id: 'anchor-boots', slot: 'boots', ko: '고정 부츠', en: 'Anchor Boots', attack: 0, hp: 10, armor: .2, traits: ['armor', 'regen', 'rescue'], variant: 1 },
     { id: 'supply-pack', slot: 'pack', ko: '보급 배낭', en: 'Supply Pack', attack: 0, hp: 14, armor: .3, traits: ['magnet', 'killHeal', 'rescue'], variant: 0 },
+    { id: 'field-pack', slot: 'pack', ko: 'HARVEST 배낭', en: 'Harvest Pack', attack: 0, hp: 14, armor: .3, traits: ['area', 'cooldown', 'linkedPower'], variant: 2 },
     { id: 'signal-pack', slot: 'pack', ko: '신호 배낭', en: 'Signal Pack', attack: 0, hp: 14, armor: .3, traits: ['area', 'cooldown', 'linkedPower'], variant: 1 },
 ];
 export const slotRecord = (value = 0) => Object.fromEntries(SLOTS.map(s => [s, value]));
@@ -32,7 +28,7 @@ export function emptyEquipment() {
 }
 const obj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) ? v : {};
 const integer = (v, max = 1e9) => typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(max, Math.floor(v))) : 0;
-export function parseEquipment(raw) {
+export function parseEquipment(raw, maxRank = 5) {
     const d = obj(raw), s = emptyEquipment();
     s.gold = integer(d.gold);
     s.gems = integer(d.gems);
@@ -47,7 +43,7 @@ export function parseEquipment(raw) {
     s.items = [];
     if (Array.isArray(d.items))
         for (const rawItem of d.items.slice(0, 1000)) {
-            const i = obj(rawItem), def = GEAR.find(x => x.id === i.def), uid = integer(i.uid), rank = integer(i.rank, 4);
+            const i = obj(rawItem), def = GEAR.find(x => x.id === i.def), uid = integer(i.uid), rank = integer(i.rank, maxRank);
             if (!def || !uid || seen.has(uid))
                 continue;
             seen.add(uid);
@@ -60,7 +56,7 @@ export function parseEquipment(raw) {
         if (s.items.some(i => i.uid === equipped[slot] && gearDef(i).slot === slot))
             s.equipped[slot] = equipped[slot];
     if (Array.isArray(d.cleared))
-        s.cleared = [...new Set(d.cleared.filter((x) => Number.isInteger(x) && x >= 0 && x < 6))];
+        s.cleared = [...new Set(d.cleared.filter((x) => Number.isInteger(x) && x >= 0 && x < 8))];
     if (Array.isArray(d.achievements))
         s.achievements = d.achievements.filter((x) => ['first-win', 'five-runs', 'thousand-kills', 'first-evolution'].includes(String(x)));
     return s;
@@ -81,11 +77,11 @@ export function upgrade(s, uid) { const item = s.items.find(i => i.uid === uid);
     return s; return { ...s, gold: s.gold - c.gold, blueprints: { ...s.blueprints, [slot]: s.blueprints[slot] - c.blueprints }, items: s.items.map(i => i.uid === uid ? { ...i, level: i.level + 1 } : i) }; }
 export function fusionGroup(s, uid) {
     const base = s.items.find(i => i.uid === uid);
-    if (!base || base.rank === 4)
+    if (!base || base.rank === 5)
         return [];
     const available = s.items.filter(i => i.uid !== uid && i.rank === base.rank && !Object.values(s.equipped).includes(i.uid));
     const same = available.filter(i => i.def === base.def).sort((a, b) => a.level - b.level || a.uid - b.uid);
-    const filler = base.rank >= 3 ? available.filter(i => i.def !== base.def && gearDef(i).slot === gearDef(base).slot).sort((a, b) => a.level - b.level || a.uid - b.uid) : [];
+    const filler = base.rank === 3 ? available.filter(i => i.def !== base.def && gearDef(i).slot === gearDef(base).slot).sort((a, b) => a.level - b.level || a.uid - b.uid) : [];
     // One matching duplicate is retained when substituting an epic material.
     const materials = same.length >= 2 ? same.slice(0, 2) : same.length === 1 && filler.length ? [same[0], filler[0]] : [];
     return materials.length === 2 ? [base, ...materials] : [];
@@ -120,6 +116,10 @@ export function gearBonus(s) {
         b.armor += d.armor * scale;
         if (d.family)
             b.family = d.family;
+        if (item.rank === 5) {
+            const trait = CHAOS_TRAITS[slot];
+            b.traits[trait] = (b.traits[trait] ?? 0) + 1;
+        }
         for (let n = 0; n < 3; n++)
             if (item.rank >= n + 2) {
                 const trait = d.traits[n];
@@ -128,3 +128,4 @@ export function gearBonus(s) {
     }
     return b;
 }
+export const CHAOS_TRAITS = { weapon: 'chaosWeapon', helmet: 'chaosHelmet', suit: 'chaosSuit', gloves: 'chaosGloves', boots: 'chaosBoots', pack: 'chaosPack' };

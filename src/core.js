@@ -1,13 +1,17 @@
+import { crewUnlocked } from './chapters.js';
+import { CREW } from './crew.js';
+import { addItem } from './equipment.js';
+import { canFuse, FUSIONS } from './combat-rules.js';
 import { META, PASSIVES, SHIPS, WAVES, WEAPONS } from './data.js';
 import { emptyEquipment, parseEquipment } from './equipment.js';
-import { awardRun, shardReward } from './economy.js';
+import { awardRun, shardReward, RUN_SKILL_LIMIT } from './economy.js';
 export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
-export const xpNeeded = (level) => level === 1 ? 54 : Math.round(level > 25 ? 2693 + (level - 25) * 35 : 68 + level * 10 + level * level * 3.8);
+export const xpNeeded = (level) => level === 1 ? 72 : Math.round(level > 25 ? 2693 + (level - 25) * 35 : 68 + level * 10 + level * level * 3.8);
 export const hpScale = (seconds) => 1 + Math.max(0, seconds) * .003;
 export const waveAt = (seconds) => WAVES[clamp(Math.floor(seconds / 60), 0, 9)];
 export function rng(seed) { let a = seed | 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 export const SAVE_KEY = 'cosmos-survivor.save.v2';
-export function defaultSave() { return { version: 3, equipment: emptyEquipment(), shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
+export function defaultSave() { return { version: 5, crew: 'pip', specialCleared: [], equipment: emptyEquipment(), shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true, telegraphs: 'boss', movement: 'weighted' }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
 const int = (v, max = 1e9) => typeof v === 'number' && Number.isFinite(v) ? clamp(Math.floor(v), 0, max) : 0;
 const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) ? v : {};
 export function parseSave(raw) {
@@ -15,12 +19,12 @@ export function parseSave(raw) {
     if (!raw)
         return { save, warning: false, future: false };
     try {
+        const data = record(JSON.parse(raw));
+        if (typeof data.version === 'number' && data.version > 5)
+            return { save, warning: true, future: true };
         if (raw.length > 100000)
             throw Error('size');
-        const data = record(JSON.parse(raw));
-        if (typeof data.version === 'number' && data.version > 3)
-            return { save, warning: true, future: true };
-        if (data.version !== 2 && data.version !== 3)
+        if (data.version !== 2 && data.version !== 3 && data.version !== 4 && data.version !== 5)
             throw Error('version');
         save.shards = int(data.shards);
         save.runs = int(data.runs);
@@ -28,7 +32,7 @@ export function parseSave(raw) {
         save.kills = int(data.kills);
         save.evolutions = int(data.evolutions);
         save.best = int(data.best, 660);
-        save.unlocked = int(data.unlocked, 5);
+        save.unlocked = int(data.unlocked, data.version === 5 ? 7 : 5);
         if (Array.isArray(data.ships))
             save.ships = SHIPS.filter(s => s.id === 'aster' || data.ships.includes(s.id)).map(s => s.id);
         if (save.ships.includes(data.ship))
@@ -45,14 +49,27 @@ export function parseSave(raw) {
         for (const k of ['reduced', 'numbers'])
             if (typeof settings[k] === 'boolean')
                 save.settings[k] = settings[k];
+        if (settings.telegraphs === 'all' || settings.telegraphs === 'off')
+            save.settings.telegraphs = settings.telegraphs;
+        if (settings.movement === 'instant')
+            save.settings.movement = 'instant';
         if (settings.lang === 'en')
             save.settings.lang = 'en';
         if (Array.isArray(data.settled))
             save.settled = data.settled.filter((v) => typeof v === 'string' && v.length < 100).slice(-100);
-        if (data.version === 3)
-            save.equipment = parseEquipment(data.equipment);
+        if (data.version === 3 || data.version === 4 || data.version === 5)
+            save.equipment = parseEquipment(data.equipment, data.version === 3 ? 4 : 5);
         else
             save.equipment.cleared = Array.from({ length: save.unlocked }, (_, i) => i);
+        if (data.version !== 5) {
+            const progressed = save.runs > 0 || save.unlocked > 0 || save.equipment.cleared.length > 0;
+            save.equipment.cleared = [...new Set([...(progressed ? [0, 1] : []), ...save.equipment.cleared.filter(n => n < 6).map(n => n + 2)])];
+            save.unlocked = progressed ? Math.min(7, save.unlocked + 2) : 0;
+        }
+        if (CREW.some(c => c.id === data.crew) && crewUnlocked(data.crew, save.equipment.cleared))
+            save.crew = data.crew;
+        if (data.version === 5 && Array.isArray(data.specialCleared) && data.specialCleared.includes('village'))
+            save.specialCleared = ['village'];
         return { save, warning: false, future: false };
     }
     catch {
@@ -69,25 +86,33 @@ export function refund(save) { let amount = 0; for (const m of META)
     amount += m.cost * save.meta[m.id] * (save.meta[m.id] + 1) / 2; return { ...save, shards: save.shards + amount, meta: defaultSave().meta }; }
 export const reward = shardReward;
 export function settle(save, result) { if (save.settled.includes(result.id))
-    return save; const r = { ...result, time: int(result.time, 660), kills: int(result.kills), sector: int(result.sector, 5), bosses: int(result.bosses, 5) }; const totals = { runs: save.runs + 1, kills: save.kills + r.kills, evolutions: save.evolutions + int(r.evolutions) }; let seed = 0; for (const c of r.id)
-    seed = Math.imul(seed, 31) + c.charCodeAt(0) | 0; return { ...save, ...totals, equipment: awardRun(save.equipment, r, rng(seed), totals), shards: save.shards + int(r.earned), wins: save.wins + Number(r.won), best: Math.max(save.best, r.time), unlocked: r.won ? Math.max(save.unlocked, Math.min(5, r.sector + 1)) : save.unlocked, settled: [...save.settled, r.id].slice(-100) }; }
+    return save; const r = { ...result, time: int(result.time, 660), kills: int(result.kills), sector: int(result.sector, 7), bosses: int(result.bosses, 5) }; const totals = { runs: save.runs + 1, kills: save.kills + r.kills, evolutions: save.evolutions + int(r.evolutions) }; let seed = 0; for (const c of r.id)
+    seed = Math.imul(seed, 31) + c.charCodeAt(0) | 0; return { ...save, ...totals, equipment: (() => { const firstSpecial = r.special && !save.specialCleared.includes(r.special); let e = awardRun(r.special ? { ...save.equipment, cleared: save.specialCleared.includes(r.special) ? [3] : [] } : save.equipment, r.special ? { ...r, sector: 3 } : r, rng(seed), totals); if (r.special)
+        e = { ...e, cleared: save.equipment.cleared }; if (firstSpecial && r.won) {
+        const uid = e.nextId;
+        e = addItem(e, 'field-pack', 2);
+        if (e.lastLoot)
+            e = { ...e, lastLoot: { ...e.lastLoot, items: [...e.lastLoot.items, ...e.items.filter(i => i.uid === uid)] } };
+    } return e; })(), specialCleared: r.special && r.won ? [...new Set([...save.specialCleared, r.special])] : save.specialCleared, shards: save.shards + int(r.earned), wins: save.wins + Number(r.won), best: Math.max(save.best, r.time), unlocked: r.won && !r.special ? Math.max(save.unlocked, Math.min(7, r.sector + 1)) : save.unlocked, settled: [...save.settled, r.id].slice(-100) }; }
 export function stats(ship, passives, meta) {
     const s = SHIPS.find(s => s.id === ship), p = (key) => passives[key] ?? 0;
-    return { maxHp: s.hp * (1 + p('hull') * .2) + meta.hull * 12, speed: s.speed * (1 + p('speed') * .08 + meta.thrust * .04), damage: 1 + p('power') * .12 + meta.output * .06, cooldown: (1 - p('haste') * .07) * (ship === 'vega' ? .85 : 1), area: 1 + p('area') * .12, magnet: 100 * (1 + p('magnet') * .3 + meta.magnet * .15), regen: .18 + p('regen') * .4 + meta.repair * .2, armor: p('armor') + meta.guard + (ship === 'atlas' ? 2 : 0), xp: 1 + meta.learning * .05 };
+    return { maxHp: s.hp * (1 + p('hull') * .2) + meta.hull * 12, speed: s.speed * (1 + p('speed') * .08 + meta.thrust * .04), damage: 1 + p('power') * .12 + meta.output * .06, cooldown: (1 - p('haste') * .07) * (ship === 'vega' ? .85 : 1), area: 1 + p('area') * .12, magnet: 100 * (1 + p('magnet') * .3 + meta.magnet * .15), regen: .18 + p('regen') * .4 + meta.repair * .2, armor: p('armor') + meta.guard + (ship === 'atlas' ? 2 : 0), xp: 1 + meta.learning * .05, crit: p('crit') * .07, pierce: p('pierce'), multi: Math.ceil(p('multi') / 2), duration: 1 + p('duration') * .18, knockback: p('knockback') * 9 };
 }
-export function weaponStats(slot, s) { const def = WEAPONS.find(w => w.id === slot.id); return { damage: def.damage * (1 + .3 * (slot.level - 1)) * s.damage * (slot.evolved ? 2 : 1), cooldown: Math.max(.12, def.cooldown * s.cooldown / (1 + .08 * (slot.level - 1))), radius: def.radius * (slot.id === 'pulse' || slot.id === 'fan' || slot.id === 'laser' ? 1 : s.area) * (1 + .04 * (slot.level - 1)), count: 1 + Number(slot.level >= 3) + Number(slot.level >= 5) }; }
-export function canEvolve(slot, passives, time) { return !slot.evolved && slot.level >= 5 && (passives[WEAPONS.find(w => w.id === slot.id).passive] ?? 0) >= 3 && time >= 300; }
+export function weaponStats(slot, s) { const def = WEAPONS.find(w => w.id === slot.id); return { damage: def.damage * (1 + .3 * (slot.level - 1)) * s.damage * (slot.evolved ? 2 : 1), cooldown: Math.max(.12, def.cooldown * s.cooldown / (1 + .08 * (slot.level - 1))), radius: def.radius * (slot.id === 'pulse' || slot.id === 'fan' || slot.id === 'laser' ? 1 : s.area) * (1 + .04 * (slot.level - 1)) * (slot.level >= 8 ? 1.6 : 1), count: 1 + Number(slot.level >= 3) + Number(slot.level >= 5) + Number(slot.level >= 8) * 2 + s.multi, duration: s.duration, breakpoint: slot.level >= 8 ? 8 : slot.level >= 5 ? 5 : slot.level >= 3 ? 3 : 1 }; }
+export function canEvolve(slot, passives, time) { return !slot.evolved && slot.level >= 8 && (passives[WEAPONS.find(w => w.id === slot.id).passive] ?? 0) >= 3 && time >= 300; }
 export function choices(weapons, passives, time, chest, random, previous = [], banished = []) {
-    const result = chest ? weapons.filter(w => canEvolve(w, passives, time)).map((w) => ({ kind: 'evolve', id: w.id })).slice(0, 3) : [];
-    const pool = [];
+    const result = chest ? FUSIONS.filter(f => canFuse(f.id, weapons, time)).map(f => ({ kind: 'fusion', id: f.id })) : [];
+    if (chest)
+        result.push(...weapons.filter(w => canEvolve(w, passives, time)).map((w) => ({ kind: 'evolve', id: w.id })).slice(0, 3 - result.length));
+    const pool = [], full = weapons.reduce((n, w) => n + w.level, 0) + Object.values(passives).reduce((n, lv) => n + (lv ?? 0), 0) >= RUN_SKILL_LIMIT;
     for (const w of WEAPONS) {
         const owned = weapons.find(s => s.id === w.id);
-        if (owned ? owned.level < 5 : weapons.length < 6)
+        if (!full && (owned ? owned.level < 8 : weapons.length < 6))
             pool.push({ kind: 'weapon', id: w.id });
     }
     for (const p of PASSIVES) {
         const owned = passives[p.id] ?? 0;
-        if (owned ? owned < 5 : Object.keys(passives).length < 6)
+        if (!full && (owned ? owned < 6 : Object.keys(passives).length < 6))
             pool.push({ kind: 'passive', id: p.id });
     }
     for (let i = pool.length - 1; i > 0; i--) {

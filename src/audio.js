@@ -1,3 +1,4 @@
+import { elementOf } from './battle.js';
 import { barSeconds, composeBar, musicIntensity, SAMPLE_RATE, synth, synthSound } from './audio-score.js';
 import { VoiceManager, soundRule } from './audio-voices.js';
 export const MUSIC_VOICE_LIMIT = 32;
@@ -167,12 +168,20 @@ export class AudioEngine {
         this.spatial = view;
         for (const e of events) {
             let id;
+            if (e.kind === 'foot' || e.kind === 'material') {
+                this.play(e.kind === 'foot' ? 'air' : 'pulse', { gain: e.kind === 'foot' ? .22 : .35, x: e.x, y: e.y, pitch: [.65, 1.4, .8, 1.8, .95, 1.1][e.value] ?? 1 });
+                continue;
+            }
             if (e.kind === 'shoot')
                 id = 'air';
-            else if (e.kind === 'hit')
-                id = e.weapon ?? 'pulse';
+            else if (e.kind === 'hit' || e.kind === 'impact') {
+                const w = e.weapon ?? 'pulse', element = elementOf(w);
+                id = ['nova', 'quake', 'ripple', 'resonance'].includes(w) ? 'wave' : element === 'gravity' ? 'gravity' : element === 'electric' ? 'spark' : element === 'fire' ? 'blast' : ['flame', 'acid', 'frost'].includes(w) ? 'field' : 'pulse';
+            }
             else if (e.kind === 'pickup')
                 id = e.value >= 12 ? 'crystal' : 'pickup';
+            else if (e.kind === 'reaction')
+                id = e.value === 2 || e.value === 5 ? 'spark' : e.value === 1 ? 'gravity' : 'blast';
             else if (e.kind === 'kill')
                 id = 'kill';
             else if (e.kind === 'swarm')
@@ -180,7 +189,7 @@ export class AudioEngine {
             else
                 id = e.kind;
             if (id)
-                this.play(id, { x: e.x, y: e.y, pitch: e.kind === 'kill' ? Math.max(.55, Math.min(1.6, 22 / (e.size ?? 22))) : e.kind === 'hit' ? Math.max(.72, Math.min(1, 30 / (e.size ?? 22))) : 1 });
+                this.play(id, { gain: e.kind === 'prepare' ? .55 : 1, x: e.x, y: e.y, pitch: e.kind === 'chest' ? .7 + e.value * .12 : e.kind === 'kill' ? Math.max(.55, Math.min(1.6, 22 / (e.size ?? 22))) : e.kind === 'hit' ? Math.max(.72, Math.min(1, 30 / (e.size ?? 22))) : 1 });
             if (e.kind === 'kill' && e.value === 2)
                 this.play('resonance', { x: e.x, y: e.y, pitch: .8 });
         }

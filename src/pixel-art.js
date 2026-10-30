@@ -1,3 +1,5 @@
+import { ELEMENTS, WEAPONS } from './data.js';
+import { skillArt, skillEvolutions, newEnemyArt } from './battle-art.js';
 const outline = '#10131d';
 const steel = { o: outline, '1': '#293342', '2': '#526579', '3': '#91a6b2', '4': '#e8f1e9', '5': '#69c9ce', '6': '#c9ffff', '7': '#e79d50', '8': '#fce7a6' };
 const green = { ...steel, '2': '#3b6455', '3': '#7ea17a', '4': '#d2e8ae', '5': '#87cf78', '6': '#e9ffd0' };
@@ -129,6 +131,22 @@ export const worldArt = {
     missile: grid('..3../.343./.353./.363./.343./.232./5.2.5/.555./..6..', gold),
     bullet: grid('..111../.12521./1256521/1266621/1256521/.12521./..111..', { ...steel, '1': '#100c20', '2': '#b62e66', '5': '#ff558b', '6': '#fff3e9' })
 };
+Object.assign(iconArt, skillArt);
+Object.assign(evolutionArt, skillEvolutions);
+Object.assign(enemyArt, newEnemyArt);
+weaponIds.push(...Object.keys(skillArt).slice(0, 12));
+passiveIds.push(...Object.keys(skillArt).slice(12));
+enemyIds.push(...Object.keys(newEnemyArt));
+for (const id of Object.keys(skillArt).slice(0, 12)) {
+    const small = (art) => ({ ...art, rows: art.rows.filter((_, y) => y % 2 === 0).map(row => [...row].filter((_, x) => x % 2 === 0).join('')) }), base = small(skillArt[id]), evolved = small(skillEvolutions[id]);
+    projectileArt[id] = [base, base, base];
+    projectileArt[id + ':evolved'] = [evolved, evolved, evolved];
+}
+for (const w of WEAPONS)
+    for (const evolved of [false, true]) {
+        const key = w.id + (evolved ? ':evolved' : ''), color = ELEMENTS[w.element].color, light = w.element === 'fire' ? '#ffe2c7' : w.element === 'electric' ? '#fff1b5' : w.element === 'ice' ? '#c9ffff' : w.element === 'gravity' ? '#dfc6ff' : '#ffffff';
+        projectileArt[key] = projectileArt[key].map((frame, i) => ({ ...frame, palette: { ...frame.palette, '1': '#10131d', '2': '#293342', '3': '#526579', '4': light, '5': i === 1 ? light : color, '6': '#e8f1e9', '7': color + '88', '8': color + '44' } }));
+    }
 const cache = new Map();
 export function pixels(id) {
     if (id.endsWith(':spark')) {
