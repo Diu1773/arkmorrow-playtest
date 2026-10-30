@@ -8,7 +8,7 @@ import * as cosmos from './cosmos.js';
 import { AudioEngine } from './audio.js';
 import { BUILD_LABEL } from './build-info.js';
 import { FrameStats, browserName, playtestRecord } from './playtest.js';
-import { DEV } from './env.js';
+import { DEV, PLAYTEST } from './env.js';
 import { TRACKS, SFX_IDS } from './audio-score.js';
 import { fillStress } from './dev-scenes.js';
 const app = document.querySelector('#app');
@@ -83,7 +83,7 @@ function titleUI() {
  <header class="menu-header"><span class="small-brand">COSMOS</span><div class="header-actions"><span class="wallet">${icon('shards')}<b>${save.shards}</b></span>${btn('shop', tr('shop'))}${btn('settings', tr('settings'), 'quiet')}</div></header>
  <section class="title-stage"><div class="hangar"><div class="title-mark"><h1 class="title-logo"><img src="./assets/pixel/logo.png" width="512" height="144" alt=""><span class="sr-only">COSMOS</span></h1><p>${tr('subtitle')}</p></div><div class="hangar-bay">${btn('ship-prev', '&#9664;', 'hangar-arrow', `aria-label="${tr('previousShip')}"`)}${shipCanvas(selected.id, true)}${btn('ship-next', '&#9654;', 'hangar-arrow', `aria-label="${tr('nextShip')}"`)}</div><div class="hangar-caption"><div><span class="ship-role">${d.shipRoles[si]}</span><h2>${d.shipNames[si]}</h2></div><div class="ship-spec"><span>${tr('hp')} <b>${Math.round(selected.hp + save.meta.hull * 12)}</b></span><span>${tr('move')} <b>${selected.speed}</b></span></div>${locked ? btn('ship', icon('lock') + ' ' + selected.cost, 'unlock-hangar', `data-id="${selected.id}"`) : ''}</div></div>
  <div class="flight-chart panel"><div class="section-title"><h2>${tr('sectorSelect')}</h2></div><div class="starmap"><canvas class="chart-lines" width="240" height="200" aria-hidden="true"></canvas>${SECTORS.map((sector, i) => `<button class="route-card ${selectedSector === i ? 'selected' : ''} ${i > save.unlocked ? 'locked' : ''}" style="--x:${points[i][0]}%;--y:${points[i][1]}%" data-act="sector" data-id="${i}" aria-disabled="${i > save.unlocked}" aria-pressed="${selectedSector === i}"><span class="route-planet"><img src="./assets/pixel/photos/${sector.image.replace('.jpg', '.png')}" width="48" height="48" alt="">${i > save.unlocked ? icon('lock') : ''}</span><b>${d.sectorNames[i]}</b></button>`).join('')}</div><div class="flight-info"><h3>${d.sectorNames[selectedSector]}</h3><span>${tr('minutes')}</span></div><div class="launch-panel"><label><span class="sr-only">${tr('difficulty')}</span><select id="difficulty" aria-label="${tr('difficulty')}">${['easy', 'normal', 'hard'].map(k => `<option value="${k}" ${difficulty === k ? 'selected' : ''}>${tr(k)}</option>`).join('')}</select></label>${btn('start', tr('launch'), 'primary launch', `data-autofocus ${locked ? 'disabled' : ''}`)}</div></div></section>
- <footer class="title-footer"><small class="build-label">${esc(BUILD_LABEL)}</small> <a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a></footer></div></main>`;
+ <footer class="title-footer"><small class="build-label">${esc(BUILD_LABEL)}</small> <a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>${DEV || PLAYTEST ? '<a class="trial-link" href="?scenes">시험 장면</a>' : ''}</footer></div></main>`;
 }
 function drawChart() { const ca = app.querySelector('.chart-lines'); if (!ca)
     return; const c = ca.getContext('2d'), points = [[36, 146], [86, 92], [41, 36], [146, 38], [199, 94], [158, 152]]; c.imageSmoothingEnabled = false; c.clearRect(0, 0, 240, 200); for (let i = 0; i < 70; i++) {
