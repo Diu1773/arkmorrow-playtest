@@ -61,4 +61,4 @@ export function runChestRates(sector, luck) {
     return rates.map(v => v / sum);
 }
 export const rollRunChest = (random, sector, luck) => rollRank(random, runChestRates(sector, luck));
-export const RUN_SKILL_LIMIT = 72;
+export const RUN_SKILL_LIMIT = 40;

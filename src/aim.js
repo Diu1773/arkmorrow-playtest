@@ -1,4 +1,4 @@
-import { WEAPONS } from './data.js';
+import { LEGACY_WEAPONS as WEAPONS } from './data.js';
 export function weaponAim(sim, id, input, range = 800) {
     const p = sim.player, mode = WEAPONS.find(w => w.id === id).aim;
     let target;

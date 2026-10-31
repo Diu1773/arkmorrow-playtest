@@ -9,6 +9,7 @@ import { canFuse, FUSIONS } from './combat-rules.js';
 import { META, PASSIVES, SHIPS, WAVES, WEAPONS } from './data.js';
 import { emptyEquipment, parseEquipment } from './equipment.js';
 import { shardReward, RUN_SKILL_LIMIT } from './economy.js';
+import { AUTO_LIMIT, PASSIVE_LIMIT, SKILL_LIMIT, SKILLS, WEAPON_LEVEL } from './combat-catalog.js';
 export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 export const xpNeeded = (level) => level === 1 ? 72 : Math.round(level > 25 ? 2693 + (level - 25) * 35 : 68 + level * 10 + level * level * 3.8);
 export const hpScale = (seconds) => 1 + Math.max(0, seconds) * .003;
@@ -100,25 +101,28 @@ export function settle(save, result) {
         seed = Math.imul(seed, 31) + c.charCodeAt(0) | 0;
     return awardMetaRun(save, r, rng(seed));
 }
-export function stats(ship, passives, meta) {
-    const s = SHIPS.find(s => s.id === ship), p = (key) => passives[key] ?? 0;
-    return { maxHp: s.hp * (1 + p('hull') * .2) + meta.hull * 12, speed: s.speed * (1 + p('speed') * .08 + meta.thrust * .04), damage: 1 + p('power') * .12 + meta.output * .06, cooldown: (1 - p('haste') * .07) * (ship === 'vega' ? .85 : 1), area: 1 + p('area') * .12, magnet: 100 * (1 + p('magnet') * .3 + meta.magnet * .15), regen: .18 + p('regen') * .4 + meta.repair * .2, armor: p('armor') + meta.guard + (ship === 'atlas' ? 2 : 0), xp: 1 + meta.learning * .05, crit: p('crit') * .07, pierce: p('pierce'), multi: Math.ceil(p('multi') / 2), duration: 1 + p('duration') * .18, knockback: p('knockback') * 9 };
+export function stats(_ship, passives, meta) {
+    const p = (key) => passives[key] ?? 0;
+    return { maxHp: 100 * (1 + p('hull') * .2) + meta.hull * 12, speed: 210 * (1 + p('speed') * .08 + meta.thrust * .04), damage: 1 + p('power') * .12 + meta.output * .06, cooldown: 1 - p('haste') * .07, area: 1 + p('area') * .12, magnet: 100 * (1 + p('magnet') * .3 + meta.magnet * .15), regen: .18 + p('regen') * .4 + meta.repair * .2, armor: p('armor') + meta.guard, xp: 1 + meta.learning * .05, crit: p('crit') * .07, pierce: p('pierce'), multi: Math.ceil(p('multi') / 2), duration: 1 + p('duration') * .18, knockback: p('knockback') * 9 };
 }
-export function weaponStats(slot, s) { const def = WEAPONS.find(w => w.id === slot.id); return { damage: def.damage * (1 + .3 * (slot.level - 1)) * s.damage * (slot.evolved ? 2 : 1), cooldown: Math.max(.12, def.cooldown * s.cooldown / (1 + .08 * (slot.level - 1))), radius: def.radius * (slot.id === 'pulse' || slot.id === 'fan' || slot.id === 'laser' ? 1 : s.area) * (1 + .04 * (slot.level - 1)) * (slot.level >= 8 ? 1.6 : 1), count: 1 + Number(slot.level >= 3) + Number(slot.level >= 5) + Number(slot.level >= 8) * 2 + s.multi, duration: s.duration, breakpoint: slot.level >= 8 ? 8 : slot.level >= 5 ? 5 : slot.level >= 3 ? 3 : 1 }; }
-export function canEvolve(slot, passives, time) { return !slot.evolved && slot.level >= 8 && (passives[WEAPONS.find(w => w.id === slot.id).passive] ?? 0) >= 3 && time >= 300; }
-export function choices(weapons, passives, time, chest, random, previous = [], banished = []) {
-    const result = chest ? FUSIONS.filter(f => canFuse(f.id, weapons, time)).map(f => ({ kind: 'fusion', id: f.id })) : [];
-    if (chest)
-        result.push(...weapons.filter(w => canEvolve(w, passives, time)).map((w) => ({ kind: 'evolve', id: w.id })).slice(0, 3 - result.length));
-    const pool = [], full = weapons.reduce((n, w) => n + w.level, 0) + Object.values(passives).reduce((n, lv) => n + (lv ?? 0), 0) >= RUN_SKILL_LIMIT;
+export function weaponStats(slot, s) { const def = WEAPONS.find(w => w.id === slot.id), level = clamp(slot.level, 1, WEAPON_LEVEL), growth = ['chain', 'blade', 'fan', 'orbit'].includes(slot.id) ? .55 : .3; return { damage: def.damage * (1 + growth * (level - 1)) * s.damage * (slot.evolved ? 1.45 : 1), cooldown: Math.max(.12, def.cooldown * s.cooldown / (1 + .08 * (level - 1))), radius: def.radius * s.area * (1 + .04 * (level - 1)), count: 1 + Number(level >= 3) + Number(level >= 5) + s.multi, duration: s.duration, breakpoint: level >= 5 ? 5 : level >= 3 ? 3 : 1 }; }
+export function canEvolve(slot, passives, _time) { const def = WEAPONS.find(w => w.id === slot.id); return !!def && !slot.evolved && slot.level >= WEAPON_LEVEL && (passives[def.passive] ?? 0) >= 1; }
+export function choices(weapons, passives, time, _chest, random, previous = [], banished = [], skills = []) {
+    const result = [...weapons.filter(w => canEvolve(w, passives, time)).map((w) => ({ kind: 'evolve', id: w.id })), ...skills.filter(s => s.level >= 5 && !s.evolved).map((s) => ({ kind: 'skillEvolve', id: s.id })), ...FUSIONS.filter(f => canFuse(f.id, weapons, time, skills)).map((f) => ({ kind: 'fusion', id: f.id }))].slice(0, 3);
+    const pool = [], full = weapons.reduce((n, w) => n + w.level, 0) + skills.reduce((n, s) => n + s.level, 0) + Object.values(passives).reduce((n, lv) => n + (lv ?? 0), 0) >= RUN_SKILL_LIMIT;
     for (const w of WEAPONS) {
         const owned = weapons.find(s => s.id === w.id);
-        if (!full && (owned ? owned.level < 8 : weapons.length < 6))
+        if (!full && (owned ? owned.level < WEAPON_LEVEL : weapons.length < AUTO_LIMIT))
             pool.push({ kind: 'weapon', id: w.id });
+    }
+    for (const skill of SKILLS) {
+        const owned = skills.find(s => s.id === skill.id);
+        if (!full && (owned ? owned.level < WEAPON_LEVEL : skills.length < SKILL_LIMIT))
+            pool.push({ kind: 'skill', id: skill.id });
     }
     for (const p of PASSIVES) {
         const owned = passives[p.id] ?? 0;
-        if (!full && (owned ? owned < 6 : Object.keys(passives).length < 6))
+        if (!full && (owned ? owned < 6 : Object.keys(passives).length < PASSIVE_LIMIT))
             pool.push({ kind: 'passive', id: p.id });
     }
     for (let i = pool.length - 1; i > 0; i--) {
@@ -127,11 +131,9 @@ export function choices(weapons, passives, time, chest, random, previous = [], b
     }
     pool.sort((a, b) => Number(previous.some(p => p.kind === a.kind && p.id === a.id)) - Number(previous.some(p => p.kind === b.kind && p.id === b.id)));
     const allowed = pool.filter(item => !banished.some(b => b.kind === item.kind && b.id === item.id));
-    if (!result.length) {
-        const w = allowed.find(i => i.kind === 'weapon');
-        if (w)
-            result.push(w);
-    }
+    const owned = allowed.find(i => i.kind === 'weapon' ? weapons.some(w => w.id === i.id) : i.kind === 'skill' ? skills.some(s => s.id === i.id) : (passives[i.id] ?? 0) > 0);
+    if (result.length < 3 && owned)
+        result.push(owned);
     for (const item of allowed)
         if (result.length < 3 && !result.includes(item))
             result.push(item);

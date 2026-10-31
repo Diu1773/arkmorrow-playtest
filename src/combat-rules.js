@@ -1,12 +1,12 @@
 export const FUSIONS = [
-    { id: 'supernova', a: 'blackhole', b: 'bomb' },
-    { id: 'thunderhead', a: 'tether', b: 'ripple' },
-    { id: 'glassfall', a: 'frost', b: 'blade' },
-    { id: 'reactor', a: 'flame', b: 'acid' },
+    { id: 'supernova', a: 'missile', b: 'void' },
+    { id: 'thunderhead', a: 'chain', b: 'flash' },
+    { id: 'glassfall', a: 'frost', b: 'hammer' },
+    { id: 'reactor', a: 'flame', b: 'reflect' },
 ];
-export const canFuse = (id, weapons, time) => {
+export const canFuse = (id, weapons, _time, skills = []) => {
     const f = FUSIONS.find(f => f.id === id);
-    return !!f && time >= 180 && [f.a, f.b].every(id => weapons.some(w => w.id === id && w.level >= 5 && !w.fusion));
+    return !!f && weapons.some(w => w.id === f.a && w.level >= 5) && skills.some(s => s.id === f.b && s.level >= 5 && !s.fusion);
 };
 export const emptyStatus = () => ({ burn: 0, freeze: 0, shock: 0, pull: 0, acid: 0, mark: 0, stun: 0, reactionCD: 0, dot: 0 });
 export const REACTIONS = [

@@ -8,6 +8,10 @@ import { titleArt } from './hub/art.js';
 import { hubUI, introUI } from './hub/ui.js';
 import { PracticeRoom } from './hub/practice.js';
 import { CHAPTER_SECONDS, CHAPTER_BOSSES } from './encounters.js';
+import { skillIcon, drawCombatIcons } from './combat-art.js';
+import { combatText, combatLabels, combatCopy } from './combat-copy.js';
+import { combatControls, updateCombatControls, passiveApplication } from './combat-ui.js';
+import { SKILLS, CREW_SKILL, skillDef } from './combat-catalog.js';
 import { CombatNotice } from './notices.js';
 import { fieldScale } from './horde.js';
 import { CREW } from './crew.js';
@@ -17,15 +21,14 @@ import { signalCopy } from './i18n.js';
 import { buildPanel, choiceDetails } from './build-ui.js';
 import { FUSIONS } from './combat-rules.js';
 import { RUN_CHESTS } from './economy.js';
-import { PASSIVES, SECTORS, SHIPS, WEAPONS } from './data.js';
-import { SAVE_KEY, clamp, deadzone, defaultSave, parseSave, settle, unlockShip, weaponStats, xpNeeded } from './core.js';
+import { PASSIVES, SECTORS, WEAPONS } from './data.js';
+import { SAVE_KEY, clamp, deadzone, defaultSave, parseSave, settle, weaponStats, xpNeeded } from './core.js';
 import { Simulation } from './sim.js';
-import { text, t, equipmentCopy, combatCopy, rankCopy } from './i18n.js';
+import { t, equipmentCopy, rankCopy } from './i18n.js';
 import { GEAR, addItem } from './equipment.js';
 import { CHAPTERS, combatPower } from './economy.js';
 import { drawGearIcons } from './equipment-art.js';
 import { icon } from './icons.js';
-import { prepareShipFrames } from './pixel-art.js';
 import * as cosmos from './cosmos.js';
 import { AudioEngine } from './audio.js';
 import { FrameStats, browserName, playtestRecord } from './playtest.js';
@@ -44,11 +47,13 @@ const parsed = parseSave(storageRaw);
 let save = parsed.save, view = 'intro', sim = null, selectedSector = 0, difficulty = 'normal', offers = [], chest = false, banishing = false, returnView = 'title', shopReturn = 'title', preview = false;
 let practice = null, introAt = performance.now();
 const keys = new Set(), pointer = { down: false, aim: false, x: 0, y: 0 }, joy = { x: 0, y: 0, id: -1, originX: 0, originY: 0 }, audio = new AudioEngine(save.settings);
+let lastSkill = null;
+let lastFusion = -1;
 let lastEvolved = 'pulse';
 const metaScreen = new MetaScreen();
 let slotFilter = 'all', rankFilter = 'all', gearSort = 'power', gearReturn = 'title';
 let special = false;
-let hangarIndex = -1, resultAt = 0, stressPreview = false, chestUntil = 0, effectsTransparency = .25, largeProjectiles = true;
+let resultAt = 0, stressPreview = false, chestUntil = 0, effectsTransparency = .25, largeProjectiles = true;
 try {
     const raw = localStorage.getItem('cosmos-survivor.effects.v1');
     if (raw !== null && Number.isFinite(Number(raw)))
@@ -59,6 +64,11 @@ try {
     largeProjectiles = localStorage.getItem('cosmos-survivor.projectiles.v1') !== '0';
 }
 catch { /* A missing visual preference uses the readable default. */ }
+let skillPressed = [false, false], autoCast = true;
+try {
+    autoCast = localStorage.getItem('cosmos-survivor.auto-cast.v1') !== '0';
+}
+catch { }
 let dashPressed = false, toastUntil = 0, stamp = 0, acc = 0, hudTime = 0, hadPad = false, padBefore = [], padMoveAt = 0, evolveUntil = 0, fps = 60, showPerf = false, frames = 0, fpsAt = 0;
 let quality = 'auto';
 const frameStats = new FrameStats();
@@ -75,7 +85,7 @@ function visualPreference(key, value) { if (!preview)
     }
     catch { } }
 const V = { w: window.innerWidth, h: window.innerHeight, dpr: 1, scale: 1, camX: 2400, camY: 1600, time: 0, shake: 0, images: {} };
-const tr = (key) => t(key, save.settings.lang), dict = () => text(save.settings.lang);
+const tr = (key) => t(key, save.settings.lang), dict = () => combatText(save.settings.lang);
 const esc = (s) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clock = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const btn = (act, label, style = '', extra = '') => `<button class="btn ${style}" data-act="${act}" ${extra}>${label}</button>`;
@@ -86,6 +96,7 @@ const hub = createDeckController({ app, save: () => save, active: () => view ===
     } if (next === 'shop')
         shopReturn = 'title'; if (next === 'practice') {
         practice = new PracticeRoom(save);
+        practice.sim.autoCast = autoCast;
         V.camX = practice.sim.player.x;
         V.camY = practice.sim.player.y;
     }
@@ -113,26 +124,24 @@ function persist() { if (preview || parsed.future || storageReadFailed)
 catch {
     toast(tr('saveWarning'));
 } }
-function resetInput() { frameStats.break(); const stick = document.getElementById('joystick'); stick?.classList.remove('active'); stick?.removeAttribute('style'); keys.clear(); pointer.down = pointer.aim = false; joy.x = joy.y = 0; joy.id = -1; dashPressed = false; acc = 0; }
+function resetInput() { frameStats.break(); const stick = document.getElementById('joystick'); stick?.classList.remove('active'); stick?.removeAttribute('style'); keys.clear(); pointer.down = pointer.aim = false; joy.x = joy.y = 0; joy.id = -1; dashPressed = false; skillPressed = [false, false]; acc = 0; }
 function focusFirst() { (app.querySelector('.meta-sheet button:not(:disabled),.meta-sheet select') ?? app.querySelector('[data-autofocus]:not(:disabled)') ?? app.querySelector('button:not(:disabled),select,input'))?.focus({ preventScroll: true }); }
 function visibleEnemies() { return sim?.enemies.reduce((n, e) => n + Number(e.hp > 0 && !e.hidden && Math.abs(e.x - V.camX) < V.w / V.scale / 2 + e.r && Math.abs(e.y - V.camY) < V.h / V.scale / 2 + e.r), 0) ?? 0; }
 function setView(next) { document.getElementById('toast')?.setAttribute('hidden', ''); toastUntil = 0; app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(view === 'intro' || view === 'title' || view === 'practice' ? 'title' : view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim)
     audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id); drawUI(); }
-function shipCanvas(id, large = false) { return `<canvas class="${large ? 'hero-ship' : 'ship-preview'}" data-ship="${id}" width="${large ? 432 : 96}" height="${large ? 336 : 96}" aria-label="${esc(dict().shipNames[SHIPS.findIndex(s => s.id === id)])}"></canvas>`; }
-function drawShips() {
+function drawIcons() {
     for (const ca of app.querySelectorAll('[data-crew]')) {
         const c = ca.getContext('2d');
         c.imageSmoothingEnabled = false;
         const id = ca.dataset.crew;
         c.drawImage(groundCrew(id, 0, 0), 0, 0, ca.width, ca.height);
     }
+    drawCombatIcons(app);
     drawGearIcons(app, [...save.equipment.items, ...(save.equipment.lastLoot?.items ?? []), ...(metaScreen.plan?.steps.flatMap(s => [s.before, s.after]) ?? [])]);
-    for (const c of app.querySelectorAll('[data-ship]'))
-        cosmos.snapshotShip(c.dataset.ship, c);
 }
 function launchUI() { const ko = save.settings.lang === 'ko', ch = chapterDef(special ? 'village' : selectedSector), ready = `<div class="launch-ready"><div><h3>${special ? (ko ? '시골 마을' : 'Country Village') : ch[save.settings.lang]}</h3><p>${CREW.find(c => c.id === save.crew).name} / ${ko ? '전투력' : 'Power'} ${combatPower(save)} / ${ko ? '권장' : 'Recommended'} ${ch.recommended}</p></div><div class="launch-panel"><select id="difficulty" aria-label="${tr('difficulty')}">${['easy', 'normal', 'hard'].map(k => `<option value="${k}" ${difficulty === k ? 'selected' : ''} ${difficultyOpen(save, special ? 'village' : String(selectedSector), k) ? '' : 'disabled'}>${tr(k)} &#215;${DIFFICULTY_REWARDS[k].toFixed(1)}</option>`).join('')}</select>${btn('start', tr('launch'), 'primary launch', 'data-autofocus')}</div></div>`; return chapterUI(save, selectedSector, ready) + `<div class="button-row">${btn('special', ko ? '\uC2A4\uD398\uC15C \uD0D0\uC0AC' : 'Special expeditions')}</div>`; }
 function specialUI() { const ko = save.settings.lang === 'ko', open = save.equipment.cleared.includes(1); return heading(ko ? '스페셜' : 'Special') + `<div class="special-landscape"><p class="meta-stars ${save.records.village?.clears.hard ? 'gold-record' : ''}">${starMarks(save.records.village?.stars ?? 0)}</p><h3>${ko ? '시골 마을' : 'Country Village'}</h3><p>${ko ? '들판에 떨어진 운석. 허수아비가 먼저 움직였다.' : 'A meteor landed. The scarecrow moved first.'}</p><p>${open ? (ko ? '본편과 별도 탐사 / HARVEST 배낭' : 'Separate expedition / HARVEST Pack') : (ko ? '본편 챕터 2 대기권 클리어 후 열림' : 'Clear story chapter 2 to unlock')}</p>${btn('special-pick', ko ? '시골 마을로' : 'Visit village', 'primary', open ? '' : 'disabled')}</div>`; }
-function hudUI() { return `<section id="hud" aria-label="${tr('hp')}"><div class="mission-box panel"><h2 id="hud-sector"></h2></div><div class="run-progress" role="progressbar" aria-label="${save.settings.lang === 'ko' ? '챕터 진행' : 'Chapter progress'}" aria-valuemin="0" aria-valuemax="100"><i id="run-fill"></i>${CHAPTER_BOSSES.map((b, i) => `<span class="boss-marker ${b.role === 'final' ? 'final' : ''}" style="left:${b.at / CHAPTER_SECONDS * 100}%" title="${clock(b.at)}" aria-label="${clock(b.at)} ${b.role === 'final' ? tr('boss') : tr('middle')}" data-at="${b.at}" data-boss="${i}">${b.role === 'final' ? '◆' : '◇'}</span>`).join('')}<b id="run-percent"></b></div><div class="hud-actions">${btn('pause', '&#8545;', 'icon-btn', `aria-label="${tr('pause')}"`)}${btn('fullscreen', tr('fullscreen'), 'small')}</div><div id="upgrade-chips"></div><div class="minimap-wrap panel"><div><span>${tr('minimap')}</span><span id="map-time"></span></div><canvas id="minimap" width="90" height="60" aria-label="${tr('minimap')}"></canvas></div><div id="bossbar" class="panel" hidden><div><b id="boss-name"></b><span id="boss-phase"></span></div><div class="meter"><i id="boss-fill"></i></div></div><div id="incoming" role="status" aria-live="polite" hidden><span id="incoming-kind"></span><b id="incoming-count"></b></div><div id="danger-label" hidden>${tr('warning')}</div><div id="objective-label"></div><div class="status-box panel" id="status-box"><div class="lv-badge"><small>${tr('level')}</small><b id="hud-level"></b></div><div class="bars"><div class="bar-row"><span>${tr('hp')}</span><div class="meter hp"><i id="hp-fill"></i><em id="hud-hp"></em></div></div><div class="bar-row"><span>${tr('xp')}</span><div class="meter xp"><i id="xp-fill"></i><em id="hud-xp"></em></div></div></div><div class="ship-tag"><b id="hud-ship"></b><span id="hud-time"></span></div></div><div id="joystick" role="group" aria-label="${tr('move')}"><div id="stick"></div><span>${tr('move')}</span></div><button id="dash-btn" aria-label="${tr('dash')}"><b>&#8599;</b><span id="dash-text">${tr('dash')}</span></button><span id="perf" hidden></span></section>`; }
+function hudUI() { return `<section id="hud" aria-label="${tr('hp')}"><div class="mission-box panel"><h2 id="hud-sector"></h2></div><div class="run-progress" role="progressbar" aria-label="${save.settings.lang === 'ko' ? '챕터 진행' : 'Chapter progress'}" aria-valuemin="0" aria-valuemax="100"><i id="run-fill"></i>${(sim?.encounters ?? CHAPTER_BOSSES).map((b, i) => `<span class="boss-marker ${b.role === 'final' ? 'final' : ''}" style="left:${b.at / (sim?.duration ?? CHAPTER_SECONDS) * 100}%" title="${clock(b.at)}" aria-label="${clock(b.at)} ${b.role === 'final' ? tr('boss') : tr('middle')}" data-at="${b.at}" data-boss="${i}">${b.role === 'final' ? '◆' : '◇'}</span>`).join('')}<b id="run-percent"></b></div><div class="hud-actions">${btn('pause', '&#8545;', 'icon-btn', `aria-label="${tr('pause')}"`)}${btn('fullscreen', tr('fullscreen'), 'small')}</div><div id="upgrade-chips"></div><div class="minimap-wrap panel"><div><span>${tr('minimap')}</span><span id="map-time"></span></div><canvas id="minimap" width="90" height="60" aria-label="${tr('minimap')}"></canvas></div><div id="bossbar" class="panel" hidden><div><b id="boss-name"></b><span id="boss-phase"></span></div><div class="meter"><i id="boss-fill"></i></div></div><div id="incoming" role="status" aria-live="polite" hidden><span id="incoming-kind"></span><b id="incoming-count"></b></div><div id="danger-label" hidden>${tr('warning')}</div><div id="objective-label"></div><div class="status-box panel" id="status-box"><div class="lv-badge"><small>${tr('level')}</small><b id="hud-level"></b></div><div class="bars"><div class="bar-row"><span>${tr('hp')}</span><div class="meter hp"><i id="hp-fill"></i><em id="hud-hp"></em></div></div><div class="bar-row"><span>${tr('xp')}</span><div class="meter xp"><i id="xp-fill"></i><em id="hud-xp"></em></div></div></div><div class="ship-tag"><b id="hud-ship"></b><span id="hud-time"></span></div></div><div id="joystick" role="group" aria-label="${tr('move')}"><div id="stick"></div><span>${tr('move')}</span></div><button id="dash-btn" aria-label="${tr('dash')}"><b>&#8599;</b><span id="dash-text">${tr('dash')}</span></button>${combatControls(save.settings.lang, sim?.autoCast ?? autoCast)}<span id="perf" hidden></span></section>`; }
 function choiceText(c) { const d = dict(); if (c.kind === 'chaos')
     return { name: 'CHAOS', desc: combatCopy(save.settings.lang).chaos[Number(c.id)], rank: 0, new: false, kind: 'CHAOS', icon: icon('chest') }; if (c.kind === 'fusion') {
     const f = FUSIONS.find(f => f.id === c.id);
@@ -142,13 +151,20 @@ function choiceText(c) { const d = dict(); if (c.kind === 'chaos')
     return { name: d.boostNames[i], desc: '', rank: 0, new: false, kind: d.boost, icon: icon(['power', 'hull', 'magnet'][i]) };
 } if (c.kind === 'weapon' || c.kind === 'evolve') {
     const i = WEAPONS.findIndex(w => w.id === c.id), w = WEAPONS[i], slot = sim.weapons.find(w => w.id === c.id);
-    return { name: slot?.fusion ? combatCopy(save.settings.lang).fusionNames[FUSIONS.findIndex(f => f.id === slot.fusion)] : c.kind === 'evolve' ? d.evolutionNames[i] : d.weaponNames[i], desc: slot?.fusion ? combatCopy(save.settings.lang).fusionDescriptions[FUSIONS.findIndex(f => f.id === slot.fusion)] : c.kind === 'evolve' ? d.evolutionDescriptions[i] : d.weaponDescriptions[i], rank: c.kind === 'evolve' ? 8 : (slot?.level ?? 0) + 1, new: !slot, kind: tr(c.kind === 'evolve' ? 'evolution' : 'weapon'), icon: icon(w.id, c.kind === 'evolve') };
+    return { name: slot?.fusion ? combatCopy(save.settings.lang).fusionNames[FUSIONS.findIndex(f => f.id === slot.fusion)] : c.kind === 'evolve' ? d.evolutionNames[i] : d.weaponNames[i], desc: slot?.fusion ? combatCopy(save.settings.lang).fusionDescriptions[FUSIONS.findIndex(f => f.id === slot.fusion)] : c.kind === 'evolve' ? d.evolutionDescriptions[i] : d.weaponDescriptions[i], rank: c.kind === 'evolve' ? 5 : (slot?.level ?? 0) + 1, new: !slot, kind: tr(c.kind === 'evolve' ? 'evolution' : 'weapon'), icon: icon(w.id, c.kind === 'evolve') };
+} if (c.kind === 'skill' || c.kind === 'skillEvolve') {
+    const def = skillDef(c.id), slot = sim.skills.find(s => s.id === c.id);
+    return { name: c.kind === 'skillEvolve' ? def.evolution : def.name, desc: def[save.settings.lang], rank: c.kind === 'skillEvolve' ? 5 : (slot?.level ?? 0) + 1, new: !slot, kind: combatLabels(save.settings.lang)[c.kind === 'skillEvolve' ? 'evolve' : 'skills'], icon: skillIcon(def.id) };
 } if (c.kind === 'passive') {
     const i = PASSIVES.findIndex(p => p.id === c.id), p = PASSIVES[i], lv = sim.passives[p.id] ?? 0;
-    return { name: d.passiveNames[i], desc: d.passiveDescriptions[i], rank: lv + 1, new: !lv, kind: tr('passive'), icon: icon(p.id) };
+    return { name: d.passiveNames[i], desc: d.passiveDescriptions[i] + ' ? ' + passiveApplication(sim, p.id, save.settings.lang), rank: lv + 1, new: !lv, kind: tr('passive'), icon: icon(p.id) };
 } return { name: tr(c.kind === 'heal' ? 'heal' : 'dustBonus'), desc: tr(c.kind === 'heal' ? 'healDesc' : 'dustDesc'), rank: 0, new: false, kind: tr('chest'), icon: icon(c.kind === 'heal' ? 'heal' : 'shards') }; }
 const pips = (level, max = 5) => `<span class="rank-pips" aria-label="${tr('level')} ${level}">${Array.from({ length: max }, (_, i) => `<i class="${i < level ? 'filled' : ''}"></i>`).join('')}</span>`;
 function choiceChange(c) {
+    if (c.kind === 'skill' || c.kind === 'skillEvolve') {
+        const slot = sim.skills.find(s => s.id === c.id);
+        return { rank: c.kind === 'skillEvolve' ? '5 ★' : `${slot?.level ?? 0} → ${(slot?.level ?? 0) + 1}`, gain: skillDef(c.id)[save.settings.lang] };
+    }
     if (c.kind === 'chaos' || c.kind === 'fusion')
         return { rank: '', gain: choiceText(c).desc };
     const d = dict(), s = sim, value = (key, n) => d[key].replace('{n}', String(n));
@@ -163,7 +179,7 @@ function choiceChange(c) {
         return { rank: `${d.lv} ${level} → ${Math.min(6, level + 1)}${level >= 5 ? ' / ' + d.max : ''}`, gain: d.passiveGains[PASSIVES.findIndex(p => p.id === c.id)] };
     }
     if (c.kind === 'weapon') {
-        const slot = s.weapons.find(w => w.id === c.id), level = slot?.level ?? 0, next = { id: c.id, level: Math.min(8, level + 1), evolved: slot?.evolved ?? false, timer: 0 }, after = weaponStats(next, s.attributes), bits = [];
+        const slot = s.weapons.find(w => w.id === c.id), level = slot?.level ?? 0, next = { id: c.id, level: Math.min(5, level + 1), evolved: slot?.evolved ?? false, timer: 0 }, after = weaponStats(next, s.attributes), bits = [];
         if (slot) {
             const before = weaponStats(slot, s.attributes);
             bits.push(value('damageGain', Math.round((after.damage / before.damage - 1) * 100)), value('delayGain', Math.round((1 - after.cooldown / before.cooldown) * 100)));
@@ -173,14 +189,14 @@ function choiceChange(c) {
         }
         else
             bits.push(value('initialDamage', Math.round(after.damage)), value('everySeconds', Number(after.cooldown.toFixed(2))));
-        return { rank: `${d.lv} ${level} → ${next.level}${next.level === 8 ? ' / ' + d.max : ''}`, gain: bits.join(' / ') };
+        return { rank: `${d.lv} ${level} → ${next.level}${next.level === 5 ? ' / ' + d.max : ''}`, gain: bits.join(' / ') };
     }
     return { rank: '', gain: '' };
 }
-function choiceUI() { return heading(chest ? rankCopy[sim.chestRank][save.settings.lang] + ' ' + tr('chest') + ' / ' + combatCopy(save.settings.lang).remaining + ' ' + (sim.chestQueue[0]?.remaining ?? 1) : tr('levelup'), banishing ? tr('banishHint') : tr('pick'), false) + `<div class="upgrade-grid">${offers.map((c, i) => { const x = choiceText(c), change = choiceChange(c); return `<button class="upgrade-card ${c.kind === 'evolve' || c.kind === 'fusion' || c.kind === 'chaos' ? 'evolve-card' : c.kind === 'passive' ? 'passive-card' : 'weapon-card'}" data-act="choose" data-id="${i}" style="--order:${i}" ${banishing && !['weapon', 'passive'].includes(c.kind) ? 'disabled' : ''}><div class="card-cap"><span>${x.kind}</span><kbd>${i + 1}</kbd></div><div class="item-portrait">${x.icon}${x.new ? '<b class="new-tag">NEW</b>' : ''}</div><h3>${x.name}</h3>${x.rank ? pips(x.rank, c.kind === 'passive' ? 6 : 8) : ''}<p class="card-level">${change.rank}</p><p>${x.desc}</p><p class="upgrade-gain">${change.gain}</p>${choiceDetails(sim, c, save.settings.lang)}</button>`; }).join('')}</div><div class="button-row">${btn('reroll', tr('reroll') + ` (${sim.rerolls})`, '', sim.rerolls <= 0 ? 'disabled' : '')}${btn('skip-cue', tr('skipCue'), 'quiet')}${btn('banish', tr(banishing ? 'cancel' : 'banish') + ` (${sim.banishes})`, 'quiet', sim.banishes <= 0 ? 'disabled' : '')}</div>`; }
-function settingsUI() { return heading(tr('settings')) + `${DEV || PLAYTEST ? `<p class="test-build">${equipmentCopy(save.settings.lang).testBuild}</p>${btn('test-currency', equipmentCopy(save.settings.lang).test)}` : ''}` + `<div class="settings-list"><label class="setting-row"><span>${save.settings.lang === 'ko' ? '알림 줄이기' : 'Fewer notifications'}</span><input type="checkbox" data-setting="lessNotices" ${save.settings.lessNotices ? 'checked' : ''}></label><label class="setting-row"><span>${save.settings.lang === 'ko' ? '움직임' : 'Movement'}</span><select data-setting="movement"><option value="weighted" ${save.settings.movement === 'weighted' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '무게감 (기본)' : 'Weighted (default)'}</option><option value="instant" ${save.settings.movement === 'instant' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '즉시' : 'Instant'}</option></select></label><label class="setting-row"><span>${signalCopy(save.settings.lang).setting}</span><select data-setting="telegraphs">${['boss', 'all', 'off'].map((mode, i) => `<option value="${mode}" ${save.settings.telegraphs === mode ? 'selected' : ''}>${signalCopy(save.settings.lang).modes[i]}</option>`).join('')}</select></label><p class="note">${signalCopy(save.settings.lang).hint}</p>${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${esc(tr('controls'))}</p><p>${esc(tr('pointerHint'))}</p><p>${esc(tr('evolveHint'))}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
+function choiceUI() { return heading(chest ? rankCopy[sim.chestRank][save.settings.lang] + ' ' + tr('chest') + ' / ' + combatCopy(save.settings.lang).remaining + ' ' + (sim.chestQueue[0]?.remaining ?? 1) : tr('levelup'), banishing ? tr('banishHint') : tr('pick'), false) + `<div class="upgrade-grid">${offers.map((c, i) => { const x = choiceText(c), change = choiceChange(c); return `<button class="upgrade-card ${c.kind === 'evolve' || c.kind === 'fusion' || c.kind === 'chaos' ? 'evolve-card' : c.kind === 'passive' ? 'passive-card' : 'weapon-card'}" data-act="choose" data-id="${i}" style="--order:${i}" ${banishing && !['weapon', 'skill', 'passive'].includes(c.kind) ? 'disabled' : ''}><div class="card-cap"><span>${x.kind}</span><kbd>${i + 1}</kbd></div><div class="item-portrait">${x.icon}${x.new ? '<b class="new-tag">NEW</b>' : ''}</div><h3>${x.name}</h3>${x.rank ? pips(x.rank, c.kind === 'passive' ? 6 : 5) : ''}<p class="card-level">${change.rank}</p><p>${x.desc}</p><p class="upgrade-gain">${change.gain}</p>${choiceDetails(sim, c, save.settings.lang)}</button>`; }).join('')}</div><div class="button-row">${btn('reroll', tr('reroll') + ` (${sim.rerolls})`, '', sim.rerolls <= 0 ? 'disabled' : '')}${btn('skip-cue', tr('skipCue'), 'quiet')}${btn('banish', tr(banishing ? 'cancel' : 'banish') + ` (${sim.banishes})`, 'quiet', sim.banishes <= 0 ? 'disabled' : '')}</div>`; }
+function settingsUI() { return heading(tr('settings')) + `${DEV || PLAYTEST ? `<p class="test-build">${equipmentCopy(save.settings.lang).testBuild}</p>${btn('test-currency', equipmentCopy(save.settings.lang).test)}` : ''}` + `<div class="settings-list"><label class="setting-row"><span>${save.settings.lang === 'ko' ? '알림 줄이기' : 'Fewer notifications'}</span><input type="checkbox" data-setting="lessNotices" ${save.settings.lessNotices ? 'checked' : ''}></label><label class="setting-row"><span>${save.settings.lang === 'ko' ? '움직임' : 'Movement'}</span><select data-setting="movement"><option value="weighted" ${save.settings.movement === 'weighted' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '무게감 (기본)' : 'Weighted (default)'}</option><option value="instant" ${save.settings.movement === 'instant' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '즉시' : 'Instant'}</option></select></label><label class="setting-row"><span>${signalCopy(save.settings.lang).setting}</span><select data-setting="telegraphs">${['boss', 'all', 'off'].map((mode, i) => `<option value="${mode}" ${save.settings.telegraphs === mode ? 'selected' : ''}>${signalCopy(save.settings.lang).modes[i]}</option>`).join('')}</select></label><p class="note">${signalCopy(save.settings.lang).hint}</p>${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${combatLabels(save.settings.lang).controls}</p><p>${combatLabels(save.settings.lang).autoHint}</p><p>${esc(tr('pointerHint'))}</p><p>${combatLabels(save.settings.lang).condition}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
 function rewardUI() { return metaRewardUI(save); }
-function resultUI() { const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${sim.chapter?.[save.settings.lang] ?? d.sectorNames[sim.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship">${shipCanvas(save.ship)}</div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${save.lastMetaLoot?.dust ?? r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && !r.special && r.sector < 7 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}${rewardUI()}<div class="button-row">${btn('shop', metaCopy(save.settings.lang).rooms)}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'primary', 'data-autofocus')}${btn('copy-record', tr('copyRecord'))}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
+function resultUI() { const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${sim.chapter?.[save.settings.lang] ?? d.sectorNames[sim.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship"><canvas data-crew="${save.crew}" width="96" height="96"></canvas></div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${save.lastMetaLoot?.dust ?? r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && !r.special && r.sector < 7 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}${rewardUI()}<div class="button-row">${btn('shop', metaCopy(save.settings.lang).rooms)}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'primary', 'data-autofocus')}${btn('copy-record', tr('copyRecord'))}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
 function animateResults(now) { if (view !== 'result')
     return; for (const el of app.querySelectorAll('[data-tally]')) {
     const n = Number(el.dataset.tally), f = save.settings.reduced ? 1 : clamp((now - resultAt) / 1000 - Number(el.dataset.delay), 0, 1), value = Math.round(n * (1 - (1 - f) ** 3));
@@ -195,6 +211,7 @@ function aimDust() { if (view !== 'result')
 function soundUI() { return heading(tr('soundRoom')) + `<p>${tr('soundHint')}</p><div class="sound-tracks">${TRACKS.map((track, i) => `<div><b>${dict().trackNames[i]}</b>${[1, 2, 3].map(level => btn('sound-track', tr('intensity') + ' ' + level, 'small', `data-id="${track.id}:${level}"`)).join('')}</div>`).join('')}</div><div class="sound-effects">${SFX_IDS.map((id, i) => btn('sound-fx', dict().soundNames[i], 'small', `data-id="${id}"`)).join('')}</div><div class="button-row">${btn('sound-stop', tr('stopSound'))}${btn('settings', tr('settings'))}</div>`; }
 function drawUI() {
     document.documentElement.classList.toggle('in-combat', view === 'playing');
+    document.documentElement.classList.toggle('in-practice', view === 'practice');
     document.documentElement.lang = save.settings.lang;
     document.documentElement.classList.toggle('motion-reduced', save.settings.reduced);
     document.title = tr('title');
@@ -212,7 +229,9 @@ function drawUI() {
         return;
     }
     if (view === 'practice') {
-        app.innerHTML = `<div class="practice-controls panel"><h2>${save.settings.lang === 'ko' ? '훈련칸' : 'Training bay'}</h2><p>${save.settings.lang === 'ko' ? '이동·회피와 자동 공격을 시험해 봐. Space 회피' : 'Try movement, dodge and automatic attacks. Space to dodge.'}</p><label>${tr('weapon')} <select id="practice-weapon">${WEAPONS.map((w, i) => `<option value="${w.id}" ${practice?.sim.weapons[0].id === w.id ? 'selected' : ''}>${dict().weaponNames[i]}</option>`).join('')}</select></label><label><input id="practice-evolved" type="checkbox" ${practice?.sim.weapons[0].evolved ? 'checked' : ''}> ${tr('evolution')}</label><b id="practice-damage"></b>${btn('hub-leave-practice', save.settings.lang === 'ko' ? '갑판으로' : 'Back to deck')}</div><div id="joystick"><div id="stick"></div></div><button id="dash-btn" class="btn">${tr('dash')}</button>`;
+        app.innerHTML = `<div class="practice-controls panel"><h2>${save.settings.lang === 'ko' ? '훈련칸' : 'Training bay'}</h2><p>${combatLabels(save.settings.lang).controls}</p><label>${tr('weapon')} <select id="practice-weapon">${WEAPONS.map((w, i) => `<option value="${w.id}" ${practice?.sim.weapons[0].id === w.id ? 'selected' : ''}>${dict().weaponNames[i]}</option>`).join('')}</select></label><label><input id="practice-evolved" type="checkbox" ${practice?.sim.weapons[0].evolved ? 'checked' : ''}> ${tr('evolution')}</label><label>${combatLabels(save.settings.lang).skills} <select id="practice-skill"><option value="">${combatLabels(save.settings.lang).empty}</option>${SKILLS.filter(s => s.id !== CREW_SKILL[save.crew]).map(s => `<option value="${s.id}" ${practice?.sim.skills[1]?.id === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}</select></label><b id="practice-damage"></b>${btn('hub-leave-practice', save.settings.lang === 'ko' ? '갑판으로' : 'Back to deck')}</div><div id="joystick"><div id="stick"></div></div><button id="dash-btn" class="btn"><span id="dash-text">${tr('dash')}</span></button>${combatControls(save.settings.lang, practice?.sim.autoCast ?? autoCast)}`;
+        if (practice)
+            updateCombatControls(practice.sim, save.settings.lang);
         return;
     }
     if (view === 'playing') {
@@ -247,11 +266,15 @@ function drawUI() {
         const slot = sim.weapons.find(w => w.id === lastEvolved), i = WEAPONS.findIndex(w => w.id === slot?.id);
         content = `<div class="evolution-show"><div class="evolution-icon">${icon(slot?.id ?? 'pulse', true)}</div><h2>${tr('evolved')}</h2><h3>${slot?.fusion ? combatCopy(save.settings.lang).fusionNames[FUSIONS.findIndex(f => f.id === slot.fusion)] : dict().evolutionNames[Math.max(0, i)]}</h3><p>${slot?.fusion ? combatCopy(save.settings.lang).fusionDescriptions[FUSIONS.findIndex(f => f.id === slot.fusion)] : dict().evolutionDescriptions[Math.max(0, i)]}</p>${btn('continue', tr('resume'), 'primary', 'data-autofocus')}</div>`;
     }
+    if (view === 'evolution' && lastSkill) {
+        const def = skillDef(lastSkill);
+        content = `<div class="evolution-show">${skillIcon(lastSkill)}<h2>${lastFusion >= 0 ? combatCopy(save.settings.lang).fusion : combatLabels(save.settings.lang).evolve}</h2><h3>${lastFusion >= 0 ? combatCopy(save.settings.lang).fusionNames[lastFusion] : def.evolution}</h3><p>${lastFusion >= 0 ? combatCopy(save.settings.lang).fusionDescriptions[lastFusion] : def[save.settings.lang]}</p>${btn('continue', tr('resume'), 'primary', 'data-autofocus')}</div>`;
+    }
     app.innerHTML = `${view === 'result' ? hubUI(save) : ''}<div id="overlay"><section id="dialog" class="${['shop', 'equipment', 'fusion', 'gacha', 'chapters'].includes(view) ? 'wide' : ''} ${view}-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">${content}</section></div>`;
     const h = app.querySelector('h2');
     if (h)
         h.id = 'dialog-title';
-    drawShips();
+    drawIcons();
     if (view === 'chapters') {
         const dialog = app.querySelector('#dialog'), node = app.querySelector('.chapter-choice.selected');
         if (dialog && node)
@@ -263,8 +286,8 @@ function drawUI() {
 }
 function start() { hub.closePanel(); hub.resetOverlay(); if (!difficultyOpen(save, special ? 'village' : String(selectedSector), difficulty))
     return; if (special && !save.equipment.cleared.includes(1))
-    return; const ground = chapterDef(special ? 'village' : selectedSector).kind === 'ground'; if ((!special && selectedSector > save.unlocked) || (!ground && hangarIndex >= 0 && !save.ships.includes(SHIPS[hangarIndex].id)))
-    return; audio.unlock(); audio.ui('start'); frameStats.reset(); sim = new Simulation(save.ship, save.meta, Date.now(), undefined, chapterDef(special ? 'village' : selectedSector).sector, difficulty, save.equipment, { chapter: special ? 'village' : selectedSector, crew: save.crew, movement: save.settings.movement }); applyRoomFeatures(sim, save); sim.telegraphs = save.settings.telegraphs; V.camX = sim.player.x; V.camY = sim.player.y; setView('playing'); }
+    return; if (!special && selectedSector > save.unlocked)
+    return; audio.unlock(); audio.ui('start'); frameStats.reset(); sim = new Simulation(save.ship, save.meta, Date.now(), undefined, chapterDef(special ? 'village' : selectedSector).sector, difficulty, save.equipment, { chapter: special ? 'village' : selectedSector, crew: save.crew, movement: save.settings.movement }); applyRoomFeatures(sim, save); sim.autoCast = autoCast; sim.telegraphs = save.settings.telegraphs; V.camX = sim.player.x; V.camY = sim.player.y; setView('playing'); }
 function openChoice() { if (!sim || sim.status !== 'playing')
     return; if (!sim.pendingLevels && !sim.pendingChests) {
     setView('playing');
@@ -283,7 +306,7 @@ function choose(index) { if (view !== 'choice' || !offers[index] || !sim)
         drawUI();
     }
     return;
-} const evolved = offers[index].kind === 'evolve' || offers[index].kind === 'fusion'; const chosenId = offers[index].kind === 'fusion' ? FUSIONS.find(f => f.id === offers[index].id).a : offers[index].id; if (!sim.apply(offers[index], chest))
+} lastFusion = FUSIONS.findIndex(f => f.id === offers[index].id); const evolved = offers[index].kind === 'evolve' || offers[index].kind === 'skillEvolve' || offers[index].kind === 'fusion'; lastSkill = offers[index].kind === 'skillEvolve' ? offers[index].id : offers[index].kind === 'fusion' ? FUSIONS.find(f => f.id === offers[index].id).b : null; const chosenId = offers[index].kind === 'fusion' ? FUSIONS.find(f => f.id === offers[index].id).a : offers[index].id; if (!sim.apply(offers[index], chest))
     return; audio.skipCue(); audio.ui(); if (evolved) {
     lastEvolved = chosenId;
     audio.consume(sim.events);
@@ -449,30 +472,6 @@ function action(act, id = '') {
         hub.openStory('capsule');
         return;
     }
-    if (act === 'ship-prev' || act === 'ship-next') {
-        const current = hangarIndex < 0 ? SHIPS.findIndex(s => s.id === save.ship) : hangarIndex;
-        hangarIndex = (current + (act === 'ship-next' ? 1 : -1) + SHIPS.length) % SHIPS.length;
-        const ship = SHIPS[hangarIndex];
-        if (save.ships.includes(ship.id)) {
-            save.ship = ship.id;
-            persist();
-        }
-        drawUI();
-        app.querySelector(`[data-act=${act}]`)?.focus({ preventScroll: true });
-        return;
-    }
-    if (act === 'ship') {
-        if (save.ships.includes(id)) {
-            save.ship = id;
-            persist();
-            drawUI();
-        }
-        else {
-            shopReturn = 'title';
-            setView('shop');
-        }
-        return;
-    }
     if (act === 'sector') {
         const n = Number(id);
         if (!Number.isInteger(n) || n < 0 || n >= CHAPTERS.length)
@@ -542,15 +541,6 @@ function action(act, id = '') {
         openChoice();
         return;
     }
-    if (act === 'unlock') {
-        audio.ui('buy');
-        save = unlockShip(save, id);
-        if (SHIPS[hangarIndex]?.id === id && save.ships.includes(id))
-            save.ship = id;
-        persist();
-        drawUI();
-        return;
-    }
     if (act === 'fullscreen')
         document.documentElement.requestFullscreen?.().catch(() => { });
 }
@@ -563,13 +553,13 @@ function updateHUD() {
         el.textContent = value; }, fill = (id, value) => { const el = document.getElementById(id); if (el)
         el.style.width = `${clamp(value, 0, 1) * 100}%`; };
     set('hud-sector', sim.chapter?.[save.settings.lang] ?? d.sectorNames[sim.sector]);
-    fill('run-fill', sim.time / CHAPTER_SECONDS);
+    fill('run-fill', sim.progress);
     set('hud-level', String(sim.level));
     set('hud-hp', `${Math.ceil(p.hp)} / ${Math.round(p.maxHp)}`);
     fill('hp-fill', p.hp / p.maxHp);
     fill('xp-fill', sim.xp / xpNeeded(sim.level));
     set('hud-xp', `${Math.floor(sim.xp / xpNeeded(sim.level) * 100)}%`);
-    set('hud-ship', sim.expedition && sim.chapter?.kind === 'ground' ? CREW.find(c => c.id === save.crew).name : d.shipNames[SHIPS.findIndex(s => s.id === sim.ship)]);
+    set('hud-ship', CREW.find(c => c.id === sim.crew).name);
     set('hud-time', clock(sim.time));
     set('map-time', clock(sim.time));
     document.getElementById('status-box')?.classList.toggle('low', p.hp < p.maxHp * .25);
@@ -605,8 +595,8 @@ function updateHUD() {
     set('incoming-kind', '');
     set('incoming-count', message);
     const progress = document.querySelector('.run-progress');
-    progress?.setAttribute('aria-valuenow', String(Math.min(100, Math.floor(sim.time / CHAPTER_SECONDS * 100))));
-    set('run-percent', clock(sim.time) + ' / 08:00');
+    progress?.setAttribute('aria-valuenow', String(Math.floor(sim.progress * 100)));
+    set('run-percent', clock(sim.time) + ' / ' + clock(sim.duration));
     for (const marker of document.querySelectorAll('[data-boss]')) {
         const record = sim.bossRecords[Number(marker.dataset.boss)];
         const passed = sim.time >= Number(marker.dataset.at);
@@ -619,7 +609,8 @@ function updateHUD() {
     document.getElementById('danger-label').hidden = save.settings.telegraphs === 'off' || !sim.hazards.some(h => h.age < h.warning && (h.boss || save.settings.telegraphs === 'all')) && !boss?.warnTime;
     set('objective-label', sim.beacon ? '◈' : sim.drops.length ? '▣' : '');
     document.getElementById('objective-label').title = sim.beacon ? tr('beaconDesc') : sim.drops.length ? tr('findChest') : '';
-    const chips = document.getElementById('upgrade-chips'), markup = `<div class="slot-label">${tr('weapon')} ${sim.weapons.length}/6</div><div class="slot-row">${Array.from({ length: 6 }, (_, i) => { const w = sim.weapons[i], wi = w ? WEAPONS.findIndex(d => d.id === w.id) : -1; return `<span class="slot ${w?.evolved ? 'evolved' : ''}" ${w ? `title="${esc(w.fusion ? combatCopy(save.settings.lang).fusionNames[FUSIONS.findIndex(f => f.id === w.fusion)] : w.evolved ? d.evolutionNames[wi] : d.weaponNames[wi])}"` : ''}>${w ? icon(w.id, w.evolved) + `<small>${w.evolved ? '&#9733;' : w.level >= 8 ? d.max : w.level}</small>` : ''}</span>`; }).join('')}</div><div class="slot-label">${tr('passive')} ${Object.keys(sim.passives).length}/6</div><div class="slot-row">${Array.from({ length: 6 }, (_, i) => { const id = Object.keys(sim.passives)[i]; return `<span class="slot">${id ? icon(id) + `<small>${sim.passives[id] >= 6 ? d.max : sim.passives[id]}</small>` : ''}</span>`; }).join('')}</div>${Object.values(sim.boosts).some(n => n > 0) ? `<div class="extra-boosts">${d.stacked}: ${d.boostDescriptions.map((label, i) => label.replace(/\d+/, String([sim.boosts.damage * 3, sim.boosts.hull * 5, sim.boosts.reach * 5][i]))).join(' / ')}</div>` : ''}`;
+    updateCombatControls(sim, save.settings.lang);
+    const chips = document.getElementById('upgrade-chips'), markup = `<div class="slot-label">${tr('weapon')} ${sim.weapons.length}/3</div><div class="slot-row">${Array.from({ length: 3 }, (_, i) => { const w = sim.weapons[i], wi = w ? WEAPONS.findIndex(d => d.id === w.id) : -1; return `<span class="slot ${w?.evolved ? 'evolved' : ''}" ${w ? `title="${esc(w.fusion ? combatCopy(save.settings.lang).fusionNames[FUSIONS.findIndex(f => f.id === w.fusion)] : w.evolved ? d.evolutionNames[wi] : d.weaponNames[wi])}"` : ''}>${w ? icon(w.id, w.evolved) + `<small>${w.evolved ? '&#9733;' : w.level >= 5 ? d.max : w.level}</small>` : ''}</span>`; }).join('')}</div><div class="slot-label">${tr('passive')} ${Object.keys(sim.passives).length}/4</div><div class="slot-row">${Array.from({ length: 4 }, (_, i) => { const id = Object.keys(sim.passives)[i]; return `<span class="slot">${id ? icon(id) + `<small>${sim.passives[id] >= 6 ? d.max : sim.passives[id]}</small>` : ''}</span>`; }).join('')}</div>${Object.values(sim.boosts).some(n => n > 0) ? `<div class="extra-boosts">${d.stacked}: ${d.boostDescriptions.map((label, i) => label.replace(/\d+/, String([sim.boosts.damage * 3, sim.boosts.hull * 5, sim.boosts.reach * 5][i]))).join(' / ')}</div>` : ''}`;
     if (chips.innerHTML !== markup)
         chips.innerHTML = markup;
     const perf = document.getElementById('perf');
@@ -655,9 +646,10 @@ function inputState() {
             ay = dy;
         }
     }
-    const dash = dashPressed || keys.has('Space') || !!pad?.buttons[1]?.pressed;
+    const dash = dashPressed || keys.has('Space') || keys.has('ShiftLeft') || keys.has('ShiftRight') || !!pad?.buttons[1]?.pressed, skill1 = skillPressed[0] || keys.has('KeyQ') || !!pad?.buttons[4]?.pressed, skill2 = skillPressed[1] || keys.has('KeyE') || !!pad?.buttons[5]?.pressed;
     dashPressed = false;
-    return { x, y, aimX: ax, aimY: ay, dash, manual };
+    skillPressed = [false, false];
+    return { x, y, aimX: ax, aimY: ay, dash, manual, skill1, skill2 };
 }
 function pollPad(now) {
     const pad = Array.from(navigator.getGamepads?.() ?? []).find(p => p?.connected);
@@ -676,7 +668,7 @@ function pollPad(now) {
         else if (view === 'pause')
             setView('playing');
     }
-    else if (view !== 'playing') {
+    else if (!['playing', 'practice'].includes(view)) {
         const dx = (pad.axes[0] ?? 0), dy = (pad.axes[1] ?? 0), active = document.activeElement;
         const horizontal = edge(15) ? 1 : edge(14) ? -1 : now - padMoveAt > 240 && Math.abs(dx) > .6 ? (dx > 0 ? 1 : -1) : 0;
         let adjusted = false;
@@ -751,6 +743,10 @@ function frame(now) {
         const output = document.getElementById('practice-damage');
         if (output)
             output.textContent = (save.settings.lang === 'ko' ? '누적 피해 ' : 'Total damage ') + Math.round(practice.damage);
+        updateCombatControls(practice.sim, save.settings.lang);
+        const dash = document.getElementById('dash-text');
+        if (dash)
+            dash.textContent = practice.sim.player.dashCD > 0 ? practice.sim.player.dashCD.toFixed(1) : tr('dash');
     }
     if (view === 'playing' && sim && !stressPreview) {
         if (sim.hitStop > 0)
@@ -812,7 +808,15 @@ app.addEventListener('pointerover', e => { const b = e.target.closest('button');
     audio.ui(b.disabled ? 'locked' : 'hover'); });
 app.addEventListener('focusin', e => { if (e.target.matches('button'))
     audio.ui('hover'); });
-app.addEventListener('change', e => { const el = e.target; if (el.hasAttribute('data-meta-scope')) {
+app.addEventListener('change', e => { const el = e.target; if (el.hasAttribute('data-combat-auto')) {
+    autoCast = el.checked;
+    if (sim)
+        sim.autoCast = autoCast;
+    if (practice)
+        practice.sim.autoCast = autoCast;
+    visualPreference('auto-cast', autoCast ? '1' : '0');
+    return;
+} if (el.hasAttribute('data-meta-scope')) {
     action('meta-scope', el.value);
     return;
 } if (el.dataset.gearFilter) {
@@ -824,9 +828,12 @@ app.addEventListener('change', e => { const el = e.target; if (el.hasAttribute('
         gearSort = el.value;
     drawUI();
     return;
-} if (el.id === 'practice-weapon' || el.id === 'practice-evolved') {
+} if (el.id === 'practice-weapon' || el.id === 'practice-evolved' || el.id === 'practice-skill') {
     const weapon = app.querySelector('#practice-weapon').value, evolved = app.querySelector('#practice-evolved').checked;
-    practice = new PracticeRoom(save, weapon, evolved);
+    const skill = app.querySelector('#practice-skill').value;
+    practice = new PracticeRoom(save, weapon, evolved, skill || undefined);
+    practice.sim.autoCast = autoCast;
+    updateCombatControls(practice.sim, save.settings.lang);
     return;
 } if (el.id === 'difficulty' && ['easy', 'normal', 'hard'].includes(el.value) && difficultyOpen(save, special ? 'village' : String(selectedSector), el.value))
     difficulty = el.value; if (el.dataset.setting === 'telegraphs') {
@@ -972,7 +979,7 @@ window.addEventListener('keydown', e => {
         action('reroll');
         return;
     }
-    if (['playing', 'practice', 'title'].includes(view) && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code))
+    if (['playing', 'practice', 'title'].includes(view) && ['Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code))
         e.preventDefault();
     keys.add(e.code);
     if (!['playing', 'practice', 'title'].includes(view) && e.code === 'Tab') {
@@ -1025,6 +1032,9 @@ app.addEventListener('pointerdown', e => { audio.unlock(); if (!['playing', 'pra
 } if (el.closest('#dash-btn')) {
     e.preventDefault();
     dashPressed = true;
+} const skill = el.closest('[data-combat-skill]'); if (skill) {
+    e.preventDefault();
+    skillPressed[Number(skill.dataset.combatSkill)] = true;
 } });
 function pointerUp(e) { pointer.down = pointer.aim = false; if (e.pointerId === joy.id) {
     joy.id = -1;
@@ -1048,7 +1058,6 @@ for (const image of [...new Set(SECTORS.map(s => s.image).concat(['horsehead.jpg
 if (storageRaw && !parsed.future && !parsed.warning && [2, 3, 4, 5].includes(JSON.parse(storageRaw).version))
     persist();
 audio.setScene('title');
-prepareShipFrames();
 resize();
 drawUI();
 requestAnimationFrame(frame);
@@ -1064,8 +1073,7 @@ function previewScreen(screen) {
     toastUntil = 0;
     stressPreview = false;
     preview = true;
-    hangarIndex = -1;
-    save = { ...defaultSave(), unlocked: 7, shards: 500, ships: SHIPS.map(s => s.id) };
+    save = { ...defaultSave(), unlocked: 7, shards: 500 };
     if (['equipment', 'fusion', 'gacha', 'chapters', 'rewards'].includes(screen)) {
         save.shards = 15000;
         save.equipment.gems = 900;

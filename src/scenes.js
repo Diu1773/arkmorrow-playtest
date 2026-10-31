@@ -33,6 +33,7 @@ export class TrialScene {
         this.id = id;
         this.sim = new Simulation('aster', defaultSave().meta, seed, 'trial-' + id);
         const s = this.sim;
+        s.autoCast = false;
         s.invincible = s.stress = true;
         s.terrain = [];
         s.obstacles = [];

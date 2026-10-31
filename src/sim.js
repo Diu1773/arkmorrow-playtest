@@ -1,4 +1,6 @@
 import { effectFeedback } from './vfx-feedback.js';
+import { AUTO_LIMIT, PASSIVE_LIMIT, SKILL_LIMIT, CREW_SKILL, SKILLS, skillSlot } from './combat-catalog.js';
+import { updateSkills, castMovement, startDash } from './combat-active.js';
 import { CHAPTER_RATE, CHAPTER_SECONDS, bossSchedule, swarmSchedule, arrivalFor } from './encounters.js';
 import { hordeTarget } from './horde.js';
 import { setupBoss, updateBoss, updateElite, updateBossWorld, arenaPoint, arenaSpawnAllowed, constrainArena, bounceArena, steerBossBullet, resetBossBullet, finishBoss } from './boss-director.js';
@@ -9,7 +11,7 @@ import { weaponAim } from './aim.js';
 import { warningShapes } from './telegraph.js';
 import { attackSkill, elementOf, impact, statusHit, updateBattleEffects } from './battle.js';
 import { canFuse, emptyStatus, FUSIONS } from './combat-rules.js';
-import { BEHAVIORS, CHAPTER_ENEMIES, ELITES, ENEMY_BEHAVIOR, ENEMY_XP, ELEMENTS, PASSIVES, CAPTAINS, ENEMIES, MODES, SECTORS, SHIPS, WEAPONS, WORLD } from './data.js';
+import { BEHAVIORS, CHAPTER_ENEMIES, ELITES, ENEMY_BEHAVIOR, ENEMY_XP, ELEMENTS, PASSIVES, CAPTAINS, ENEMIES, MODES, SECTORS, WEAPONS, WORLD } from './data.js';
 import { Pool, SpatialHash, canEvolve, choices, clamp, hpScale, moveVector, reward, rng, stats, waveAt, weaponStats, xpNeeded } from './core.js';
 import { gearBonus } from './equipment.js';
 import { CHAPTERS, ECONOMY, RUN_CHESTS, RUN_SKILL_LIMIT, rollRunChest } from './economy.js';
@@ -19,6 +21,12 @@ export const inGap = (gaps, width, a) => gaps.some(g => Math.abs(Math.atan2(Math
 export function segmentDistance(px, py, ax, ay, bx, by) { const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy, t = l ? clamp(((px - ax) * dx + (py - ay) * dy) / l, 0, 1) : 0; return Math.hypot(px - ax - dx * t, py - ay - dy * t); }
 function squaredSegmentDistance(px, py, ax, ay, bx, by) { const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy, t = l ? clamp(((px - ax) * dx + (py - ay) * dy) / l, 0, 1) : 0, qx = px - ax - dx * t, qy = py - ay - dy * t; return qx * qx + qy * qy; }
 export class Simulation {
+    skills = [];
+    autoCast = true;
+    combatFields = [];
+    dashGhosts = [];
+    skillUses = {};
+    dashUses = 0;
     particleMinimum = 0;
     stepAttributes;
     frameIndex = 0;
@@ -114,7 +122,7 @@ export class Simulation {
     chaosGloveAt = 0;
     chaosHelmetAt = 12;
     chaosPackAt = 15;
-    get skillLevels() { return this.weapons.reduce((n, w) => n + w.level, 0) + Object.values(this.passives).reduce((n, lv) => n + (lv ?? 0), 0); }
+    get skillLevels() { return this.weapons.reduce((n, w) => n + w.level, 0) + this.skills.reduce((n, s) => n + s.level, 0) + Object.values(this.passives).reduce((n, lv) => n + (lv ?? 0), 0); }
     get chestRank() { return this.chestQueue[0]?.rank ?? 0; }
     floaters = [];
     weapons;
@@ -141,6 +149,8 @@ export class Simulation {
         this.rerolls = 3 + meta.forecast;
         if (equipment) {
             this.equipment = gearBonus(equipment);
+            if (this.equipment.family === 'nova')
+                this.equipment.family = 'resonance';
             this.chapter = CHAPTERS[this.sector + 2];
         }
         this.chapterKey = this.sector + 2;
@@ -155,21 +165,21 @@ export class Simulation {
             this.crewShield = this.chapter.kind === 'ground' && this.crew === 'pip';
         }
         const person = CREW.find(c => c.id === this.crew), s = stats(ship, {}, meta);
-        if (this.chapter?.kind === 'ground' && this.expedition)
-            s.maxHp += person.hp - SHIPS.find(c => c.id === ship).hp;
+        s.maxHp += person.hp - 100;
+        this.crewShield = this.expedition && this.crew === 'pip';
+        this.skills = [skillSlot(CREW_SKILL[this.crew])];
         const hp = s.maxHp + this.equipment.hp;
         this.player = { x: 2400, y: 1600, vx: 0, vy: 0, r: 16, angle: -Math.PI / 2, ship, hp, maxHp: hp, invul: 3, flash: 0, dashTime: 0, dashCD: 0, dashX: 0, dashY: -1, range: 500, orbitCount: 0, orbitRadius: 100, inDark: false };
-        this.weapons = [{ id: SHIPS.find(s => s.id === ship).weapon, level: 1, evolved: false, timer: .15 }];
+        const start = WEAPONS.some(w => w.id === this.equipment.family) ? this.equipment.family : 'pulse';
+        this.weapons = [{ id: start, level: 1, evolved: false, timer: .15 }];
         this.buildTerrain();
         for (let i = 0; i < 22; i++) {
             const a = this.random() * TAU, d = 550 + this.random() * 1500;
             this.obstacles.push({ x: clamp(2400 + Math.cos(a) * d, 100, 4700), y: clamp(1600 + Math.sin(a) * d, 100, 3100), r: 24 + this.random() * 22, kind: i % 4 === 0 ? 'station' : 'debris', angle: a, solid: true });
         }
-        if (this.expedition && LOCAL_ENEMIES[this.chapter.id]) {
+        if (this.expedition && LOCAL_ENEMIES[this.chapter.id])
             buildSurface(this);
-            this.weapons[0].id = this.chapter.kind === 'ground' ? person.weapon : this.weapons[0].id;
-            this.player.r = this.crew === 'mew' && this.chapter.kind === 'ground' ? 11 : 16;
-        }
+        this.player.r = this.crew === 'mew' ? 11 : 16;
         if (this.expedition) {
             this.nextSupply *= CHAPTER_RATE;
             this.nextBeacon *= CHAPTER_RATE;
@@ -375,10 +385,10 @@ export class Simulation {
     get pickups() { return this.gemPool.active; }
     get effects() { return this.effectPool.active; }
     get attributes() { if (this.stepAttributes)
-        return this.stepAttributes; const s = stats(this.ship, this.passives, this.meta), b = this.equipment, t = b.traits; if (this.expedition && this.chapter?.kind === 'ground') {
-        const c = CREW.find(c => c.id === this.crew), ship = SHIPS.find(c => c.id === this.ship);
-        s.maxHp += (c.hp - ship.hp) * (1 + (this.passives.hull ?? 0) * .2);
-        s.speed *= c.speed / ship.speed;
+        return this.stepAttributes; const s = stats(this.ship, this.passives, this.meta), b = this.equipment, t = b.traits; {
+        const c = CREW.find(c => c.id === this.crew);
+        s.maxHp += (c.hp - 100) * (1 + (this.passives.hull ?? 0) * .2);
+        s.speed *= c.speed / 210;
         if (c.id === 'mori')
             s.xp *= 1.2;
         if (c.id === 'bolt')
@@ -433,13 +443,13 @@ export class Simulation {
         const b = (enemy ? this.bulletPool : this.shotPool).acquire();
         if (!b)
             return null;
-        Object.assign(b, { x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, r: enemy ? 6 : 4, damage, life, age: 0, kind, color, pierce, targetId: 0, weapon, split: false, reflected: false });
+        Object.assign(b, { x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, r: enemy ? 6 : 4, damage, life, age: 0, kind, color, pierce, targetId: 0, weapon, split: false, reflected: false, returning: false });
         b.hit.clear();
         resetBossBullet(b);
         return b;
     }
     effect(kind, x, y, radius, color, life = .5, damage = 0, x2 = 0, y2 = 0, repeat = false, weapon = 'pulse') { const e = this.effectPool.acquire(); if (!e)
-        return null; Object.assign(e, { kind, x, y, radius, color, ttl: life, life, damage, x2, y2, done: false, repeat, weapon, tick: 0 }); e.hits.clear(); return e; }
+        return null; Object.assign(e, { kind, x, y, radius, color, ttl: life, life, damage, x2, y2, done: false, repeat, weapon, tick: 0, skillVisual: false }); e.hits.clear(); return e; }
     nearest(x, y, radius, excluded) { return this.hash.nearest(x, y, radius, e => e.hp > 0 && !e.hidden && !excluded?.has(e.id) && (!this.expedition || Math.abs(e.x - this.player.x) <= this.viewWidth / 2 + e.r && Math.abs(e.y - this.player.y) <= this.viewHeight / 2 + e.r)); }
     hit(e, damage, weapon = 'pulse', reactive = true, origin = { x: this.player.x, y: this.player.y }) {
         if (e.hp <= 0 || e.hidden || e.mirror > 0 || e.stageGuard > 0)
@@ -569,9 +579,9 @@ export class Simulation {
     offers(chest = false, previous = []) {
         if (chest && this.chestRank === 5)
             return [{ kind: 'chaos', id: String(this.chestQueue[0]?.chaos ?? 0) }];
-        let offers = choices(this.weapons, this.passives, this.time, chest, this.random, previous, this.banished);
+        let offers = choices(this.weapons, this.passives, this.time, chest, this.random, previous, this.banished, this.skills);
         if (chest && this.chestRank === 3) {
-            const evolved = offers.filter(c => c.kind === 'evolve' || c.kind === 'fusion');
+            const evolved = offers.filter(c => c.kind === 'evolve' || c.kind === 'skillEvolve' || c.kind === 'fusion');
             if (evolved.length)
                 return evolved;
         }
@@ -583,7 +593,7 @@ export class Simulation {
     apply(choice, chest = false) {
         if (chest ? this.pendingChests <= 0 : this.pendingLevels <= 0)
             return false;
-        if ((choice.kind === 'weapon' || choice.kind === 'passive') && this.skillLevels >= RUN_SKILL_LIMIT)
+        if ((choice.kind === 'weapon' || choice.kind === 'passive' || choice.kind === 'skill') && this.skillLevels >= RUN_SKILL_LIMIT)
             return false;
         const old = this.attributes.maxHp;
         if (choice.kind === 'weapon') {
@@ -591,21 +601,43 @@ export class Simulation {
             if (!def || this.banished.some(b => b.kind === choice.kind && b.id === choice.id))
                 return false;
             if (slot) {
-                if (slot.level >= 8)
+                if (slot.level >= 5)
                     return false;
                 slot.level++;
             }
-            else if (this.weapons.length < 6)
+            else if (this.weapons.length < AUTO_LIMIT)
                 this.weapons.push({ id: def.id, level: 1, evolved: false, timer: 0 });
             else
                 return false;
+        }
+        else if (choice.kind === 'skill') {
+            const def = SKILLS.find(s => s.id === choice.id), slot = this.skills.find(s => s.id === choice.id);
+            if (!def || this.banished.some(b => b.kind === 'skill' && b.id === choice.id))
+                return false;
+            if (slot) {
+                if (slot.level >= 5)
+                    return false;
+                slot.level++;
+            }
+            else if (this.skills.length < SKILL_LIMIT)
+                this.skills.push(skillSlot(def.id));
+            else
+                return false;
+        }
+        else if (choice.kind === 'skillEvolve') {
+            const slot = this.skills.find(s => s.id === choice.id);
+            if (!slot || slot.level < 5 || slot.evolved)
+                return false;
+            slot.evolved = true;
+            this.evolutions++;
+            this.emit('evolve');
         }
         else if (choice.kind === 'passive') {
             const key = choice.id;
             if (!PASSIVES.some(p => p.id === key) || this.banished.some(b => b.kind === choice.kind && b.id === choice.id))
                 return false;
             const level = this.passives[key] ?? 0;
-            if (level >= 6 || (!level && Object.keys(this.passives).length >= 6))
+            if (level >= 6 || (!level && Object.keys(this.passives).length >= PASSIVE_LIMIT))
                 return false;
             this.passives[key] = level + 1;
         }
@@ -615,7 +647,7 @@ export class Simulation {
             const id = Number(choice.id);
             if (id === 0) {
                 for (const w of this.weapons)
-                    w.level += Math.max(0, Math.min(8 - w.level, RUN_CHESTS.chaosWeaponLevels, RUN_SKILL_LIMIT - this.skillLevels));
+                    w.level += Math.max(0, Math.min(5 - w.level, RUN_CHESTS.chaosWeaponLevels, RUN_SKILL_LIMIT - this.skillLevels));
                 this.chaos.hp *= 1 - RUN_CHESTS.chaosHpCost;
             }
             else if (id === 1) {
@@ -633,20 +665,18 @@ export class Simulation {
             this.emit('evolve');
         }
         else if (choice.kind === 'fusion') {
-            if (!chest || !canFuse(choice.id, this.weapons, this.time))
+            if (!canFuse(choice.id, this.weapons, this.time, this.skills))
                 return false;
-            const f = FUSIONS.find(f => f.id === choice.id), a = this.weapons.find(w => w.id === f.a);
-            a.fusion = f.id;
-            a.evolved = true;
-            this.weapons = this.weapons.filter(w => w.id !== f.b);
+            const f = FUSIONS.find(f => f.id === choice.id), slot = this.skills.find(s => s.id === f.b);
+            slot.fusion = f.id;
             this.evolutions++;
             this.emit('evolve');
-            this.effect('evolve', this.player.x, this.player.y, 300, ELEMENTS[elementOf(a.id)].color, 1);
+            this.effect('evolve', this.player.x, this.player.y, 300, '#bd82ee', 1);
             this.shake = 8;
         }
         else if (choice.kind === 'evolve') {
             const slot = this.weapons.find(w => w.id === choice.id);
-            if (!chest || !slot || !canEvolve(slot, this.passives, this.time))
+            if (!slot || !canEvolve(slot, this.passives, this.time))
                 return false;
             slot.evolved = true;
             this.evolutions++;
@@ -680,7 +710,7 @@ export class Simulation {
             this.pendingLevels--;
         return true;
     }
-    banish(choice) { if (this.banishes <= 0 || !['weapon', 'passive'].includes(choice.kind) || this.banished.some(b => b.kind === choice.kind && b.id === choice.id))
+    banish(choice) { if (this.banishes <= 0 || !['weapon', 'skill', 'passive'].includes(choice.kind) || this.banished.some(b => b.kind === choice.kind && b.id === choice.id))
         return false; this.banishes--; this.banished.push({ ...choice }); return true; }
     buildTerrain() {
         const T = [], r = this.random, range = (a, b) => a + r() * (b - a);
@@ -1029,13 +1059,13 @@ export class Simulation {
         if (slot.id === 'pulse' || slot.id === 'fan') {
             if (!t && !input.manual)
                 return;
-            const fan = slot.id === 'fan', n = (fan ? (slot.evolved ? 9 : 5 + Number(slot.level >= 3) + Number(slot.level >= 5) + Number(slot.level >= 8) * 2 + s.multi) : w.count + (slot.evolved ? 2 : 0)) + extra;
+            const fan = slot.id === 'fan', n = (fan ? (4 + w.count + (slot.evolved ? 1 : 0)) : w.count + (slot.evolved ? 2 : 0)) + extra;
             for (let j = 0; j < n; j++)
-                this.fire(p.x + Math.cos(a) * 20, p.y + Math.sin(a) * 20, a + (j - (n - 1) / 2) * (fan ? .16 : .11), fan ? 460 : 670, damage, false, 'pulse', def.color, w.radius / (fan ? 460 : 670), (slot.evolved ? 3 : this.ship === 'lynx' ? 1 : 0) + s.pierce, slot.id);
+                this.fire(p.x + Math.cos(a) * 20, p.y + Math.sin(a) * 20, a + (j - (n - 1) / 2) * (fan ? .16 : .11), fan ? 460 : 670, damage, false, 'pulse', def.color, w.radius / (fan ? 460 : 670), (slot.evolved ? 2 : 0) + s.pierce, slot.id);
             this.emit('shoot', p.x, p.y, 0, def.color, slot.id);
         }
         else if (slot.id === 'missile' && t) {
-            for (let j = 0; j < (slot.evolved ? 5 : Math.min(3, w.count)) + extra; j++) {
+            for (let j = 0; j < (w.count + (slot.evolved ? 1 : 0)) + extra; j++) {
                 const shot = this.fire(p.x, p.y, a + (j - (w.count - 1) / 2) * .35, 310, damage, false, 'missile', def.color, 3);
                 if (shot)
                     shot.targetId = target?.id ?? 0;
@@ -1050,7 +1080,7 @@ export class Simulation {
             }
             let last = { x: p.x, y: p.y }, next = target;
             const used = new Set();
-            for (let j = 0; j < (slot.evolved ? 9 : 2 + w.count) && next; j++) {
+            for (let j = 0; j < (2 + w.count + (slot.evolved ? 2 : 0)) && next; j++) {
                 used.add(next.id);
                 this.hit(next, damage, slot.id);
                 this.effect('line', last.x, last.y, 0, def.color, .2, 0, next.x, next.y, false, slot.id);
@@ -1059,8 +1089,8 @@ export class Simulation {
             }
         }
         else if (slot.id === 'laser' && t) {
-            for (let j = 0; j < (slot.evolved ? 5 : w.count); j++) {
-                const ang = a + (j - ((slot.evolved ? 5 : w.count) - 1) / 2) * .2, x2 = p.x + Math.cos(ang) * w.radius, y2 = p.y + Math.sin(ang) * w.radius;
+            for (let j = 0; j < (w.count + (slot.evolved ? 1 : 0)); j++) {
+                const ang = a + (j - ((w.count + (slot.evolved ? 1 : 0)) - 1) / 2) * .2, x2 = p.x + Math.cos(ang) * w.radius, y2 = p.y + Math.sin(ang) * w.radius;
                 this.hash.query(p.x, p.y, w.radius + 70, e => { if (e.hp > 0 && segmentDistance(e.x, e.y, p.x, p.y, x2, y2) < e.r + 8)
                     this.hit(e, damage, slot.id); });
                 if (bt && segmentDistance(bt.x, bt.y, p.x, p.y, x2, y2) < bt.r + 8)
@@ -1071,8 +1101,8 @@ export class Simulation {
         }
         else if (slot.id === 'mine') {
             this.emit('shoot', p.x, p.y, 0, def.color, slot.id);
-            for (let j = 0; j < (slot.evolved ? 5 : w.count); j++)
-                this.effect('mine', p.x - Math.cos(a) * 40 + Math.cos(j * TAU / 3) * j * 40, p.y - Math.sin(a) * 40 + Math.sin(j * TAU / 3) * j * 40, w.radius, def.color, 1.2, damage, 0, 0, slot.evolved || slot.level >= 8, slot.id);
+            for (let j = 0; j < (w.count + (slot.evolved ? 1 : 0)); j++)
+                this.effect('mine', p.x - Math.cos(a) * 40 + Math.cos(j * TAU / 3) * j * 40, p.y - Math.sin(a) * 40 + Math.sin(j * TAU / 3) * j * 40, w.radius, def.color, 1.2 * w.duration, damage, 0, 0, slot.evolved || slot.level >= 8, slot.id);
         }
         else if (slot.id === 'nova') {
             this.emit('shoot', p.x, p.y, 0, def.color, slot.id);
@@ -1090,7 +1120,7 @@ export class Simulation {
                 this.effect('mine', p.x, p.y, r, def.color, .45, damage * .7, 0, 0, false, slot.id);
         }
     }
-    orbitAttack(slot) { const p = this.player, w = weaponStats(slot, this.attributes), n = (slot.evolved ? 8 : 2 + Number(slot.level >= 3) + Number(slot.level >= 5) + Number(slot.level >= 8) * 2) + this.attributes.multi + (slot.id === this.equipment.family ? (this.equipment.traits.linkedShot ?? 0) : 0), r = w.radius * (slot.evolved ? 1.3 : 1); p.orbitCount = n; p.orbitRadius = r; for (let j = 0; j < n; j++) {
+    orbitAttack(slot) { const p = this.player, w = weaponStats(slot, this.attributes), n = (1 + w.count + (slot.evolved ? 1 : 0)) + (slot.id === this.equipment.family ? (this.equipment.traits.linkedShot ?? 0) : 0), r = w.radius * (slot.evolved ? 1.3 : 1); p.orbitCount = n; p.orbitRadius = r; for (let j = 0; j < n; j++) {
         const a = this.orbitAngle + j / n * TAU, x = p.x + Math.cos(a) * r, y = p.y + Math.sin(a) * r;
         this.hash.query(x, y, 110, e => { if (e.hp > 0 && this.time - e.orbitHit >= w.cooldown && (x - e.x) ** 2 + (y - e.y) ** 2 < (e.r + 15) ** 2) {
             e.orbitHit = this.time;
@@ -1115,6 +1145,10 @@ export class Simulation {
             b.age += dt;
             const ox = b.x, oy = b.y;
             if (b.kind === 'blade' && b.age > .65) {
+                if (!b.returning) {
+                    b.returning = true;
+                    b.hit.clear();
+                }
                 const a = Math.atan2(this.player.y - b.y, this.player.x - b.x);
                 b.vx += (Math.cos(a) * 390 - b.vx) * Math.min(1, dt * 10);
                 b.vy += (Math.sin(a) * 390 - b.vy) * Math.min(1, dt * 10);
@@ -1174,7 +1208,7 @@ export class Simulation {
                         return;
                     }
                     if (b.kind === 'missile' || b.kind === 'bomb') {
-                        const w = this.weapons.find(w => w.id === b.weapon), radius = (b.kind === 'bomb' ? 135 : WEAPONS[2].radius) * this.attributes.area * (w?.level === 8 ? 1.6 : 1);
+                        const w = this.weapons.find(w => w.id === b.weapon), radius = (b.kind === 'bomb' ? 135 : WEAPONS.find(w => w.id === 'missile').radius) * this.attributes.area * (w ? 1 + .04 * (Math.min(5, w.level) - 1) : 1);
                         impact(this, b.x, b.y, radius, b.damage, b.weapon);
                         if (b.kind === 'bomb' && w?.evolved)
                             for (let j = 0; j < 3; j++)
@@ -1337,7 +1371,7 @@ export class Simulation {
             return;
         dt = Math.min(dt, .1);
         this.time = Math.min(this.expedition ? 528 : 660, this.time + dt);
-        const p = this.player, s = this.attributes, m = moveVector(input.x, input.y);
+        const p = this.player, s = this.attributes, slow = castMovement(this), direction = moveVector(input.x, input.y), m = { x: direction.x * slow, y: direction.y * slow };
         this.stepAttributes = s;
         this.particleMinimum = 0;
         if (this.expedition && LOCAL_ENEMIES[this.chapter.id]) {
@@ -1356,20 +1390,9 @@ export class Simulation {
         if (input.dash && p.dashCD <= 0) {
             if (this.equipment.traits.chaosBoots)
                 this.effect('ground', p.x, p.y, 100, ELEMENTS.fire.color, 2.5, 30, 0, 0, false, 'flame');
-            p.dashTime = .22;
-            p.dashCD = 4.5 * (this.equipment.traits.dashHaste ? .7 : 1);
-            const len = Math.hypot(m.x, m.y);
-            p.dashX = len ? m.x / len : Math.cos(p.angle);
-            p.dashY = len ? m.y / len : Math.sin(p.angle);
+            startDash(this, m.x, m.y);
         }
-        if (this.expedition)
-            moveExpedition(this, dt, m, s.speed);
-        else {
-            p.vx = p.dashTime > 0 ? p.dashX * 650 : m.x * s.speed * this.speed;
-            p.vy = p.dashTime > 0 ? p.dashY * 650 : m.y * s.speed * this.speed;
-            p.x = clamp(p.x + p.vx * dt, 30, 4770);
-            p.y = clamp(p.y + p.vy * dt, 30, 3170);
-        }
+        moveExpedition(this, dt, m, s.speed);
         if (Math.hypot(m.x, m.y) > .1)
             p.angle = Math.atan2(m.y, m.x);
         constrainArena(this);
@@ -1488,7 +1511,7 @@ export class Simulation {
             }
         }
         if (this.expedition) {
-            const slot = this.weapons[0], kind = WEAPONS.find(w => w.id === slot.id).aim, target = kind === 'closest' ? this.nearest(p.x, p.y, 800) : undefined;
+            const slot = this.weapons[0], kind = WEAPONS.find(w => w.id === slot?.id)?.aim, target = kind === 'closest' ? this.nearest(p.x, p.y, 800) : undefined;
             this.aimAngle = input.manual ? Math.atan2(input.aimY, input.aimX) : target ? Math.atan2(target.y - p.y, target.x - p.x) : p.angle;
         }
         p.orbitCount = 0;
@@ -1504,6 +1527,7 @@ export class Simulation {
                 slot.timer = weaponStats(slot, s).cooldown;
             }
         }
+        updateSkills(this, dt, input);
         this.updateProjectiles(this.shotPool, dt, false);
         this.updateProjectiles(this.bulletPool, dt, true);
         this.updateHazards(dt);
@@ -1589,5 +1613,5 @@ export class Simulation {
         this.status = 'lost';
     } }
     result() { return { difficulty: this.difficulty, middleKilled: this.bossRecords.some(r => r.role === 'middle' && r.killed !== null), id: this.id, sector: this.expedition ? (this.chapterKey === 'village' ? 3 : this.chapterKey) : this.sector, special: this.chapterKey === 'village' ? 'village' : undefined, time: this.time, kills: this.kills, rewardKills: this.expedition ? this.rewardKills : undefined, won: this.status === 'won', earned: this.stress ? 0 : reward(this.time, this.expedition ? this.rewardKills : this.kills, this.bonus, this.status === 'won'), evolutions: this.evolutions, bosses: this.bossRecords.filter(r => r.killed !== null).length }; }
-    setLoadout(weapons, passives) { this.weapons = weapons.slice(0, 6).map(id => ({ id, level: 8, evolved: false, timer: 0 })); this.passives = { ...passives }; this.player.maxHp = this.attributes.maxHp; this.player.hp = this.player.maxHp; }
+    setLoadout(weapons, passives) { this.weapons = weapons.filter(id => WEAPONS.some(w => w.id === id)).slice(0, AUTO_LIMIT).map(id => ({ id, level: 5, evolved: false, timer: 0 })); this.passives = Object.fromEntries(Object.entries(passives).slice(0, PASSIVE_LIMIT).map(([id, lv]) => [id, clamp(lv ?? 0, 0, 6)])); this.player.maxHp = this.attributes.maxHp; this.player.hp = this.player.maxHp; }
 }

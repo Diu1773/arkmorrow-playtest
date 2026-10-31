@@ -1,4 +1,4 @@
-import { WEAPONS } from './data.js';
+import { LEGACY_WEAPONS as WEAPONS } from './data.js';
 export const FX_PALETTE = ['#090d18', '#1b2132', '#252d3d', '#38445a', '#526579', '#91a6b2', '#d0d8ce', '#fff4db', '#254e62', '#3da6ba', '#78e1df', '#c4f4ee', '#323d79', '#536caf', '#89b9ed', '#d2eeff', '#49335e', '#76529a', '#aa8cce', '#e3d0f2', '#543d43', '#9b5748', '#e68a4b', '#f6bf58', '#756544', '#b69b62', '#e9d699', '#fff1b0', '#264e48', '#488a67', '#83bd75', '#c2e8a0'];
 export const FX_LIMITS = { bursts: 96, lowBursts: 24, particles: 240, lowParticles: 60, effects: 180, lowEffects: 48, atlases: 3, atlasSize: 1024 };
 const ramps = { physical: [4, 9, 10, 11], fire: [20, 21, 22, 23], ice: [12, 13, 14, 15], electric: [24, 25, 26, 27], poison: [28, 29, 30, 31], gravity: [16, 17, 18, 19] };

@@ -1,3 +1,4 @@
+import {drawSkillFields} from './combat-art.js';
 import {EffectRenderer} from './vfx-art.js';
 const vfx=new EffectRenderer();
 import {pixelContext} from './pixel-context.js';
@@ -149,25 +150,14 @@ function pixelBatch(items,idFor,angleFor=()=>0,scale=1){
 
 function enemyBullet(b){pixelStamp('bullet'+(Math.floor(v.time*8+(b.age||0)*2)%2===0?':spark':''),b.x,b.y,0,enlarged?1:.75);}
 function player(G,p,settings){
- if(G.expedition&&G.chapter?.kind==='ground'){
- const a=G.aimAngle??p.angle,d=Math.abs(Math.cos(a))>Math.abs(Math.sin(a))?(Math.cos(a)>0?3:1):(Math.sin(a)>0?0:2),frame=Math.hypot(p.vx,p.vy)>20?Math.floor(v.time*8)%4:0,img=groundCrew(G.crew,d,frame,p.flash>0),x=X(p.x),y=Y(p.y),firing=G.muzzleTime>0,back=Math.sin(a)<-.35;
- const gun=weaponFrame(G.crew,a,firing),recoil=firing?2:0;
+ const a=G.aimAngle??p.angle,d=Math.abs(Math.cos(a))>Math.abs(Math.sin(a))?(Math.cos(a)>0?3:1):(Math.sin(a)>0?0:2),frame=Math.hypot(p.vx,p.vy)>20?Math.floor(v.time*8)%4:0,img=groundCrew(G.crew||'pip',d,frame,p.flash>0),x=X(p.x),y=Y(p.y),firing=G.muzzleTime>0,back=Math.sin(a)<-.35;
+ if(!settings.reduced)for(const ghost of G.dashGhosts||[]){ctx.globalAlpha=Math.max(0,ghost.life)*1.4;ctx.drawImage(img,X(ghost.x)-18,Y(ghost.y)-30);}ctx.globalAlpha=1;
+ if(G.chapter?.kind!=='ground'){const flicker=settings.reduced?0:Math.floor(v.time*12)%3;rect(x-11,y-10,5,10,'#657182');rect(x+7,y-10,5,10,'#657182');rect(x-10,y,3,5+flicker*2,'#f0a33a');rect(x+8,y,3,5+flicker*2,'#79d8f2');}
+ const gun=weaponFrame(G.crew||'pip',a,firing),recoil=firing?2:0;
  const drawGun=()=>ctx.drawImage(gun,x-17-Math.round(Math.cos(a)*recoil),y-31-Math.round(Math.sin(a)*recoil));
  if(back)drawGun();ctx.drawImage(img,x-18,y-30);if(!back)drawGun();
- line(x-5,y+2,x+5,y+2,'#090d18',3);line(x-4,y+2,x+4,y+2,'#78e1df',1);return;}
-
-
- const ang=(p.angle||0)+Math.PI/2,size=Math.max(1,Math.round(76*unit)),cx=X(p.x),cy=Y(p.y);
- if(p.dashTime>0){ctx.globalAlpha=.3;for(let i=1;i<3;i++)stamp('ship:'+p.ship,p.x-Math.cos(p.angle)*i*24,p.y-Math.sin(p.angle)*i*24,76,ang);ctx.globalAlpha=1;}
  if(p.invul>0)arc(p.x,p.y,p.r*1.6,0,TAU,'#aacbd0',2,true);
- const direction=directionFrame(ang),flame=settings.reduced?0:Math.floor(v.time*12)%3;
- const key='ship:'+p.ship+':'+direction+':'+flame+':'+size+':'+Number(p.flash>0);
- stamp('ship:'+p.ship,p.x,p.y,76,ang,flame,p.flash>0);
- const img=sizedSprites.get(key);if(img){const rim=outlined(img);ctx.drawImage(rim,cx-Math.floor(size/2)-1,cy-Math.floor(size/2)-1);}
- // The marker stays outside the hull so its centre can be found in a crowd.
- const foot=cy+Math.max(9,Math.round(29*unit));line(cx-4,foot,cx+4,foot,'#090c14',3);line(cx-3,foot,cx+3,foot,'#c9ffff');rect(cx,foot-2,1,2,'#c9ffff');
- const facing=p.angle??-Math.PI/2;line(cx,foot,cx+Math.cos(facing)*7,foot+Math.sin(facing)*7,'#d9d9c8',1);rect(cx+Math.cos(facing)*7-1,foot+Math.sin(facing)*7-1,2,2,'#f1e8d2');
- if(img)overlapRim(G,p,img,cx-Math.floor(size/2)-1,cy-Math.floor(size/2)-1);
+ line(x-5,y+2,x+5,y+2,'#090d18',3);line(x-4,y+2,x+4,y+2,'#78e1df',1);
 }
 let overlapCanvas;
 function overlapRim(G,p,img,x,y){
@@ -201,6 +191,7 @@ export function render(G,V,settings={}){setup();if(!ctx||ctx.lost)return;if(canv
  ctx.globalAlpha=opacity;vfx.chests(ctx);ctx.globalAlpha=1;
  const b=G.beacon;if(b?.hp>0){stamp('beacon',b.x,b.y,b.r*3);hpBar(b,b.r*2,b.y+b.r*1.7,'#8fc6ad');}
  hazards(G);paintBossThreats(ctx,G,X,Y,unit);enemyWarnings(G,settings);arrows(G);
+ drawSkillFields(ctx,G,{X,Y,unit,time:v.time,reduced:settings.reduced});
  if(p)player(G,p,settings);
  pixelBatch(G.bullets||[],b=>'bullet'+(Math.floor(v.time*8+(b.age||0)*2)%2===0?':spark':''),undefined,enlarged?1:.75);
  if(intro>=0&&intro<1.2){ctx.globalAlpha=.2*Math.sin(intro/1.2*Math.PI);rect(0,0,cw,ch,'#080a16');ctx.globalAlpha=1;}

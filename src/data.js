@@ -1,5 +1,5 @@
 export const ELEMENTS = { physical: { color: '#e8f1e9', symbol: '◆' }, fire: { color: '#f0a33a', symbol: '♨' }, ice: { color: '#79d8f2', symbol: '❄' }, electric: { color: '#f6d454', symbol: 'ϟ' }, gravity: { color: '#bd82ee', symbol: '◉' } };
-export const WEAPONS = [
+export const LEGACY_WEAPONS = [
     { id: 'pulse', aim: 'closest', passive: 'regen', damage: 25, cooldown: .55, radius: 500, color: '#a9d8df' },
     { id: 'orbit', aim: 'none', passive: 'speed', damage: 20, cooldown: .42, radius: 100, color: '#b3c7ff' },
     { id: 'missile', aim: 'closest', passive: 'area', damage: 45, cooldown: 1.8, radius: 90, color: '#ffc18b' },
@@ -21,10 +21,20 @@ export const WEAPONS = [
     { id: 'blade', aim: 'movement', passive: 'pierce', damage: 48, cooldown: 1.5, radius: 420, color: '#79d8f2', element: 'ice' },
     { id: 'resonance', aim: 'none', passive: 'thorns', damage: 35, cooldown: 2.8, radius: 190, color: '#e8f1e9', element: 'physical' }
 ];
-for (const w of WEAPONS) {
+for (const w of LEGACY_WEAPONS) {
     w.element ??= w.id === 'missile' || w.id === 'mine' ? 'fire' : w.id === 'chain' ? 'electric' : 'physical';
     w.color = ELEMENTS[w.element].color;
 }
+const tuning = {
+    pulse: [30, .65, 'crit'], orbit: [24, .65, 'area'], missile: [38, 1.3, 'haste'], chain: [35, 1.15, 'electric'],
+    laser: [34, 1.25, 'duration'], mine: [50, 1.55, 'volatile'], fan: [6.5, .95, 'knockback'],
+    frost: [6.5, 2.5, 'ice'], flame: [7, 2.5, 'fire'], blade: [28, 1.5, 'pierce'], turret: [10, 4, 'multi'], resonance: [19, 2.8, 'thorns'],
+};
+export const WEAPONS = LEGACY_WEAPONS.filter(w => tuning[w.id]).map(w => {
+    const [damage, cooldown, passive] = tuning[w.id];
+    return { ...w, damage, cooldown, passive };
+});
+export const weaponTextIndex = (id) => LEGACY_WEAPONS.findIndex(w => w.id === id);
 export const PASSIVES = [
     { id: 'power', color: '#ffc66d' }, { id: 'haste', color: '#d8b5ff' }, { id: 'speed', color: '#a9d8df' },
     { id: 'hull', color: '#d0d6e0' }, { id: 'area', color: '#ffe4a0' }, { id: 'magnet', color: '#ffd260' },

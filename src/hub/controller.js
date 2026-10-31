@@ -1,3 +1,4 @@
+import { CREW_SKILL, skillDef } from '../combat-catalog.js';
 import { DeckState, places } from './model.js';
 import { deckArt, deckCamera, portraitArt } from './art.js';
 import { crewPanel, dialogueUI, unlockText } from './ui.js';
@@ -147,7 +148,7 @@ export function createDeckController(o) {
             flash.hidden = now >= crewFlashUntil;
             if (!flash.hidden) {
                 const person = CREW.find(c => c.id === deck.crew);
-                flash.textContent = person.name + ' / ' + person.weaponName;
+                flash.textContent = person.name + ' / ' + skillDef(CREW_SKILL[person.id]).name;
             }
         }
         if (storyPlayer) {

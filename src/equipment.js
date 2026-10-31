@@ -7,7 +7,7 @@ export const GEAR = [
     { id: 'pulse-kit', slot: 'weapon', ko: 'PULSE 탐사총', en: 'PULSE Kit', family: 'pulse', attack: .16, hp: 0, armor: 0, traits: ['linkedShot', 'bossDamage', 'linkedPower'], variant: 0 },
     { id: 'orbit-kit', slot: 'weapon', ko: 'ORBITER 조종기', en: 'ORBITER Rig', family: 'orbit', attack: .16, hp: 0, armor: 0, traits: ['linkedShot', 'bossDamage', 'linkedPower'], variant: 1 },
     { id: 'meteor-kit', slot: 'weapon', ko: 'METEOR 발사기', en: 'METEOR Launcher', family: 'missile', attack: .16, hp: 0, armor: 0, traits: ['linkedShot', 'bossDamage', 'linkedPower'], variant: 2 },
-    { id: 'wave-kit', slot: 'weapon', ko: 'SHOCKWAVE 진동기', en: 'SHOCKWAVE Rig', family: 'nova', attack: .16, hp: 0, armor: 0, traits: ['linkedShot', 'bossDamage', 'linkedPower'], variant: 3 },
+    { id: 'wave-kit', slot: 'weapon', ko: 'RESONANCE 진동기', en: 'RESONANCE Rig', family: 'nova', attack: .16, hp: 0, armor: 0, traits: ['linkedShot', 'bossDamage', 'linkedPower'], variant: 3 },
     { id: 'survey-helmet', slot: 'helmet', ko: '관측 헬멧', en: 'Survey Helmet', attack: 0, hp: 12, armor: .3, traits: ['magnet', 'xp', 'lastShield'], variant: 0 },
     { id: 'rescue-helmet', slot: 'helmet', ko: '구조 헬멧', en: 'Rescue Helmet', attack: 0, hp: 12, armor: .3, traits: ['regen', 'bossDamage', 'rescue'], variant: 1 },
     { id: 'patch-suit', slot: 'suit', ko: '덧댄 우주복', en: 'Patch Suit', attack: 0, hp: 20, armor: .5, traits: ['armor', 'regen', 'rescue'], variant: 0 },

@@ -1,9 +1,9 @@
 import { weaponAim } from './aim.js';
-import { ELEMENTS, WEAPONS } from './data.js';
+import { ELEMENTS, LEGACY_WEAPONS } from './data.js';
 import { clamp, weaponStats } from './core.js';
 import { REACTIONS, reactionFor } from './combat-rules.js';
 import { combatCopy } from './i18n.js';
-const weaponElements = Object.fromEntries(WEAPONS.map(w => [w.id, w.element ?? 'physical']));
+const weaponElements = Object.fromEntries(LEGACY_WEAPONS.map(w => [w.id, w.element ?? 'physical']));
 export const elementOf = (weapon) => weaponElements[weapon] ?? 'physical';
 export function impact(sim, x, y, r, damage, weapon, push = 0) {
     sim.areaDamage(x, y, r, damage, push, weapon);
@@ -62,11 +62,11 @@ export function statusHit(sim, e, damage, weapon) {
         s.stun = Math.max(s.stun, .16);
 }
 export function attackSkill(sim, slot, input) {
-    if (WEAPONS.findIndex(w => w.id === slot.id) < 8 && !slot.fusion)
+    if (!['flame', 'frost', 'blade', 'turret', 'resonance'].includes(slot.id))
         return false;
     const p = sim.player, s = sim.attributes, w = weaponStats(slot, s), element = elementOf(slot.id), color = ELEMENTS[element].color;
     const aim = weaponAim(sim, slot.id, input, 650), target = aim.target, a = aim.angle;
-    const x = aim.x, y = aim.y, damage = w.damage * sim.power, n = slot.evolved ? 3 : slot.level >= 5 ? 3 : slot.level >= 3 ? 2 : 1;
+    const x = aim.x, y = aim.y, damage = w.damage * sim.power, n = w.count + (slot.evolved ? 1 : 0);
     const zone = (kind, xx, yy, r, life, dmg = damage, weapon = slot.id) => sim.effect(kind, xx, yy, r, ELEMENTS[elementOf(weapon)].color, life * w.duration, dmg, 0, 0, false, weapon);
     if (slot.fusion === 'supernova') {
         zone('gravity', x, y, w.radius * 1.35, 2.3, damage);
@@ -149,7 +149,8 @@ export function attackSkill(sim, slot, input) {
             sim.fire(p.x, p.y, a + (j - (w.count - 1) / 2) * .35, 320, damage, false, 'blade', color, 1.9, 2 + s.pierce, slot.id);
     }
     else if (slot.id === 'resonance')
-        sim.effect('resonance', p.x, p.y, w.radius, color, slot.evolved ? 2.1 : slot.level >= 8 ? 1.8 : slot.level >= 5 ? 1.5 : slot.level >= 3 ? 1.2 : .9, damage, 0, 0, false, slot.id);
+        for (let j = 0; j < w.count; j++)
+            sim.effect('resonance', p.x + Math.cos(j * 2.4) * j * 30, p.y + Math.sin(j * 2.4) * j * 30, w.radius, color, (slot.evolved ? 1.5 : slot.level >= 5 ? 1.2 : slot.level >= 3 ? 1 : .9) * w.duration, damage, 0, 0, false, slot.id);
     sim.emit('shoot', p.x, p.y, 0, color, slot.id);
     return true;
 }
@@ -169,7 +170,7 @@ export function updateBattleEffects(sim, dt) {
             e.x += e.x2 * dt;
             e.y += e.y2 * dt;
         }
-        if (['ground', 'quake', 'gravity', 'turret', 'tether', 'ripple', 'wave', 'resonance'].includes(e.kind) && e.tick <= 0) {
+        if (!e.skillVisual && ['ground', 'quake', 'gravity', 'turret', 'tether', 'ripple', 'wave', 'resonance'].includes(e.kind) && e.tick <= 0) {
             const cadence = e.kind === 'resonance' ? .3 : .38;
             e.tick = cadence;
             if (e.kind === 'turret') {
@@ -214,7 +215,7 @@ export function updateBattleEffects(sim, dt) {
                 sim.burst(e.x, e.y, e.color, 3, 1, e.kind === 'gravity');
         }
         if (e.ttl <= 0) {
-            if (e.kind === 'gravity')
+            if (e.kind === 'gravity' && !e.skillVisual)
                 impact(sim, e.x, e.y, e.radius, e.damage * 2, 'blackhole');
             if (e.kind === 'splitwarn') {
                 sim.spawn('mini', e.x - 18, e.y, '', false, e.repeat);
