@@ -1,9 +1,11 @@
 import { LEGACY_WEAPONS as WEAPONS } from './data.js';
+import { EFFECT_ELEMENTS, EFFECT_SHAPES, EFFECT_READ_LIMITS, EFFECT_FPS, effectFrame, paintEffect, paintElement } from './effect-grammar.js';
 export const FX_PALETTE = ['#090d18', '#1b2132', '#252d3d', '#38445a', '#526579', '#91a6b2', '#d0d8ce', '#fff4db', '#254e62', '#3da6ba', '#78e1df', '#c4f4ee', '#323d79', '#536caf', '#89b9ed', '#d2eeff', '#49335e', '#76529a', '#aa8cce', '#e3d0f2', '#543d43', '#9b5748', '#e68a4b', '#f6bf58', '#756544', '#b69b62', '#e9d699', '#fff1b0', '#264e48', '#488a67', '#83bd75', '#c2e8a0'];
 export const FX_LIMITS = { bursts: 96, lowBursts: 24, particles: 240, lowParticles: 60, effects: 180, lowEffects: 48, atlases: 3, atlasSize: 1024 };
-const ramps = { physical: [4, 9, 10, 11], fire: [20, 21, 22, 23], ice: [12, 13, 14, 15], electric: [24, 25, 26, 27], poison: [28, 29, 30, 31], gravity: [16, 17, 18, 19] };
+const ramps = { physical: [4, 5, 6, 7], fire: [20, 21, 22, 23], ice: [8, 9, 10, 11], electric: [24, 25, 26, 27], poison: [28, 29, 30, 31], gravity: [16, 17, 18, 19] };
 const family = (id) => id === 'acid' ? 'poison' : WEAPONS.find(w => w.id === id)?.element ?? 'physical';
 const ramp = (id) => ramps[family(id)];
+const elementOf = (id) => id === 'acid' ? 'acid' : family(id);
 const masks = [
     '..aa......./.abbbaaaa../aabbbbccca./.abbbaaaa../..aa.......',
     '...aaa...../.aabbaa..../aabccbaa.../abccccba.../.abccbaa.../..aabaa....',
@@ -28,7 +30,7 @@ const masks = [
 ];
 const stamps = new Map(), pages = [];
 let shelfX = 0, shelfY = 0, shelfH = 0;
-function bake(key, size, paint) {
+function bakeStamp(key, size, paint) {
     if (!pages.length || shelfY + size + 2 > FX_LIMITS.atlasSize) {
         if (pages.length === FX_LIMITS.atlases)
             throw Error('Effect atlas capacity exceeded');
@@ -45,20 +47,40 @@ function bake(key, size, paint) {
     }
     if (shelfY + size + 2 > FX_LIMITS.atlasSize) {
         shelfY = FX_LIMITS.atlasSize;
-        return bake(key, size, paint);
+        return bakeStamp(key, size, paint);
     }
-    const image = pages.at(-1), x = shelfX, y = shelfY, c = image.getContext('2d');
+    const image = pages.at(-1), x = shelfX, y = shelfY, c = image.getContext('2d'), occupied = new Uint8Array(size * size);
     shelfX += size + 2;
     shelfH = Math.max(shelfH, size);
     let minX = size, minY = size, maxX = 0, maxY = 0;
     const dot = (dx, dy, color, w = 1, h = w) => { dx = Math.round(dx + size / 2); dy = Math.round(dy + size / 2); const left = Math.max(0, dx), top = Math.max(0, dy), right = Math.min(size, dx + w), bottom = Math.min(size, dy + h); if (right <= left || bottom <= top)
-        return; minX = Math.min(minX, left); minY = Math.min(minY, top); maxX = Math.max(maxX, right); maxY = Math.max(maxY, bottom); c.fillStyle = FX_PALETTE[color]; c.fillRect(x + left, y + top, right - left, bottom - top); };
+        return; minX = Math.min(minX, left); minY = Math.min(minY, top); maxX = Math.max(maxX, right); maxY = Math.max(maxY, bottom); for (let yy = top; yy < bottom; yy++)
+        occupied.fill(1, yy * size + left, yy * size + right); c.fillStyle = FX_PALETTE[color]; c.fillRect(x + left, y + top, right - left, bottom - top); };
     const line = (ax, ay, bx, by, col, w = 2) => { const n = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay)))); for (let i = 0; i <= n; i++)
         dot(ax + (bx - ax) * i / n, ay + (by - ay) * i / n, col, w); };
     paint({ dot, line });
+    const left = Math.max(0, minX - 1), top = Math.max(0, minY - 1), right = Math.min(size, maxX + 1), bottom = Math.min(size, maxY + 1);
+    c.fillStyle = FX_PALETTE[0];
+    for (let yy = top; yy < bottom; yy++)
+        for (let xx = left; xx < right; xx++) {
+            const pos = yy * size + xx;
+            if (!occupied[pos] && (xx > 0 && occupied[pos - 1] || xx < size - 1 && occupied[pos + 1] || yy > 0 && occupied[pos - size] || yy < size - 1 && occupied[pos + size]))
+                c.fillRect(x + xx, y + yy, 1, 1);
+        }
+    minX = left;
+    minY = top;
+    maxX = right;
+    maxY = bottom;
     stamps.set(key, { image, x, y, size, left: minX, top: minY, right: maxX, bottom: maxY });
 }
 function glyph(b, id, frame, tier, direction) {
+    if (['flame', 'frost', 'chain', 'acid', 'blackhole'].includes(id)) {
+        const a = direction * Math.PI / 4, co = Math.cos(a), si = Math.sin(a), scale = tier ? .7 : .55;
+        paintElement({ dot: (x, y, c, w = 1, h = w) => b.dot((x * co - y * si) * scale, (x * si + y * co) * scale, c, Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale))), line: (x, y, ex, ey, c, w = 1) => b.line((x * co - y * si) * scale, (x * si + y * co) * scale, (ex * co - ey * si) * scale, (ex * si + ey * co) * scale, c, w) }, elementOf(id), frame * 2 + tier);
+        if (tier)
+            b.dot(7, -6, 7, 2, 1);
+        return;
+    }
     const index = Math.max(0, WEAPONS.findIndex(w => w.id === id)), rows = masks[index].split('/'), colors = ramp(id), a = direction * Math.PI / 4, co = Math.cos(a), si = Math.sin(a), scale = tier ? 1.22 : 1;
     for (let y = 0; y < rows.length; y++)
         for (let x = 0; x < rows[y].length; x++)
@@ -74,38 +96,8 @@ function glyph(b, id, frame, tier, direction) {
     }
 }
 function impactArt(b, id, f, variant = 0) {
-    const colors = ramp(id), i = WEAPONS.findIndex(w => w.id === id), phase = Math.max(0, f - 1), n = 6 + Math.max(0, i) % 5;
-    if (f < 2) {
-        b.dot(-2, -3, 7, f ? 4 : 6);
-        b.line(-8, 0, 7, 0, colors[3], 2);
-        b.line(0, -7, 0, 6, colors[2], 2);
-        return;
-    }
-    for (let j = 0; j < n; j++) {
-        const a = j * Math.PI * 2 / n + i * .22, r = 3 + phase * (variant === 1 ? 3 : 2.3) + (j % 3), x = Math.cos(a) * r, y = Math.sin(a) * r, col = f > 5 ? 4 : colors[(j + f) % 3 + 1];
-        if (family(id) === 'ice') {
-            b.line(x, y, x + Math.cos(a) * 5, y + Math.sin(a) * 5, col, 2);
-            b.dot(x - 2, y + 1, colors[3], 2);
-        }
-        else if (family(id) === 'electric') {
-            b.line(x * .3, y * .3, x, y, col, 2);
-            b.line(x, y, x + Math.sin(a) * 4, y - Math.cos(a) * 4, colors[3]);
-        }
-        else if (id === 'acid') {
-            b.dot(x - 2, y - 3, col, 4, f < 5 ? 5 : 2);
-            b.dot(x - 1, y - 4, colors[3], 2);
-        }
-        else if (family(id) === 'gravity') {
-            b.dot(Math.cos(a + phase * .5) * r, Math.sin(a + phase * .5) * r * .65, col, 3, 2);
-        }
-        else {
-            b.dot(x - 2, y - 2, col, f > 5 ? 2 : 4, f > 5 ? 2 : 3 + (j % 2));
-            if (f < 5)
-                b.dot(x - 1, y - 3, colors[3], 2);
-        }
-    }
-    if (f < 6)
-        glyph(b, id, f % 4, 0, 0);
+    const scale = variant ? 1.6 : 1.25;
+    paintEffect({ dot: (x, y, c, w = 1, h = w) => b.dot(x * scale, y * scale, c, Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale))), line: (x, y, ex, ey, c, w = 1) => b.line(x * scale, y * scale, ex * scale, ey * scale, c, w) }, elementOf(id), 'explosion', f);
 }
 function fieldArt(b, kind, f) {
     const id = kind === 'ground' ? 'flame' : kind === 'shatter' ? 'frost' : kind === 'mark' ? 'mark' : kind === 'tether' ? 'tether' : 'ripple', colors = ramp(id), p = f / 7;
@@ -159,11 +151,11 @@ function holeArt(b, f) {
     }
     for (let j = 0; j < 80; j++) {
         const a = j * Math.PI / 40, front = Math.sin(a) > 0, r = 24 + Math.sin(a * 3 + phase) * 2, x = Math.cos(a) * r, y = Math.sin(a) * r * .33 - 4 + Math.cos(a) * .24 * r;
-        b.dot(x, y, front ? (j + f * 3) % 11 < 4 ? 7 : 23 : (j + f * 4) % 13 < 5 ? 19 : 17, front ? 3 : 2, front ? 3 : 2);
+        b.dot(x, y, front ? (j + f * 3) % 11 < 4 ? 19 : 18 : (j + f * 4) % 13 < 5 ? 19 : 17, front ? 3 : 2, front ? 3 : 2);
     }
     for (let j = 0; j < 10; j++) {
         const t = ((j / 10 + f / 8) % 1), a = j * 2.4 + phase + t * 2, r = 42 * (1 - t);
-        b.dot(Math.cos(a) * r, Math.sin(a) * r * .6, t > .5 ? 27 : 18, 2);
+        b.dot(Math.cos(a) * r, Math.sin(a) * r * .6, t > .5 ? 19 : 18, 2);
     }
 }
 const rankColors = [6, 10, 18, 14, 23, 19];
@@ -188,6 +180,11 @@ function chestArt(b, rank, f) {
 function initialize() {
     if (pages.length)
         return;
+    const jobs = [], bake = (key, size, paint) => jobs.push({ key, size, paint });
+    for (const element of EFFECT_ELEMENTS)
+        for (const shape of EFFECT_SHAPES)
+            for (let f = 0; f < 8; f++)
+                bake(`grammar:${element}:${shape}:${f}`, 32, b => paintEffect(b, element, shape, f));
     for (const w of WEAPONS)
         for (let tier = 0; tier < 2; tier++)
             for (let f = 0; f < 4; f++)
@@ -197,10 +194,10 @@ function initialize() {
         for (let f = 0; f < 8; f++)
             bake(`hit:${w.id}:${f}`, 48, b => impactArt(b, w.id, f));
     for (const w of WEAPONS)
-        for (let f = 0; f < 4; f++)
-            bake(`ground:${w.id}:${f}`, 64, b => { for (let j = 0; j < 13; j++) {
-                const a = j * 2.4, r = Math.sqrt((j + .5) / 13) * 24;
-                glyph({ dot: (x, y, c, ww, h) => b.dot(x * .65 + Math.cos(a) * r, y * .65 + Math.sin(a) * r, c, ww, h), line: b.line }, w.id, (f + j) % 4, 0, 0);
+        for (let f = 0; f < 8; f++)
+            bake(`ground:${w.id}:${f}`, 48, b => { for (let j = 0; j < 9; j++) {
+                const a = j * 2.4, r = Math.sqrt((j + .5) / 9) * 15;
+                paintElement({ dot: (x, y, c, ww = 1, h = ww) => b.dot(x * .5 + Math.cos(a) * r, y * .5 + Math.sin(a) * r, c, ww, h), line: (x, y, ex, ey, c, ww = 1) => b.line(x * .5 + Math.cos(a) * r, y * .5 + Math.sin(a) * r, ex * .5 + Math.cos(a) * r, ey * .5 + Math.sin(a) * r, c, ww) }, elementOf(w.id), (f + j) % 8);
             } });
     for (const kind of ['ring', 'blast', 'ripple', 'wave', 'quake', 'mark', 'resonance', 'shatter'])
         for (let f = 0; f < 8; f++)
@@ -259,6 +256,8 @@ function initialize() {
                         fieldArt(b, 'ring', f);
                 }
             });
+    for (const job of jobs.sort((a, b) => b.size - a.size))
+        bakeStamp(job.key, job.size, job.paint);
 }
 export function vfxSprite(key) { initialize(); const s = stamps.get(key); if (!s)
     throw Error('Unknown effect frame: ' + key); return s; }
@@ -274,6 +273,9 @@ export class EffectRenderer {
     upgraded = new Map();
     holes = [];
     low = false;
+    cells = new Map();
+    selected = new Set();
+    pressure = false;
     warpImage;
     warpFrame = -1;
     warpScene = null;
@@ -292,6 +294,19 @@ export class EffectRenderer {
         this.upgraded.clear();
         for (const w of scene?.weapons ?? [])
             this.upgraded.set(w.id, w.fusion ? 2 : w.evolved ? 1 : 0);
+        this.cells.clear();
+        this.selected.clear();
+        this.pressure = (scene?.shots.length ?? 0) + (scene?.effects.length ?? 0) > 160;
+        const occupied = new Map(), fieldLimit = p.low ? EFFECT_READ_LIMITS.lowFields : EFFECT_READ_LIMITS.fields;
+        for (const e of [...(scene?.effects ?? [])].sort((a, b) => b.radius - a.radius)) {
+            if (!this.visible(e.x, e.y, e.radius * p.unit + 40))
+                continue;
+            const key = Math.floor(p.X(e.x) / EFFECT_READ_LIMITS.cell) + ':' + Math.floor(p.Y(e.y) / EFFECT_READ_LIMITS.cell), n = occupied.get(key) ?? 0;
+            if (this.selected.size >= fieldLimit || n >= EFFECT_READ_LIMITS.fieldsPerCell)
+                continue;
+            this.selected.add(e);
+            occupied.set(key, n + 1);
+        }
         const limit = p.low ? FX_LIMITS.lowBursts : FX_LIMITS.bursts;
         this.bursts = this.bursts.filter(b => p.time - b.birth < (b.kind === 'chest' ? 1.1 : .64)).slice(-limit);
         for (const d of scene?.drops ?? [])
@@ -323,14 +338,25 @@ export class EffectRenderer {
             this.bursts.push(b);
         }
     }
+    effect(ctx, spec, x, y, age, loop = false) {
+        const f = effectFrame(spec, age, loop, this.p?.reduced ?? false);
+        this.draw(ctx, `grammar:${spec.element}:${spec.shape}:${f}`, x, y, spec.size);
+    }
     draw(ctx, key, x, y, size) {
-        const s = vfxSprite(key), n = Math.max(1, Math.round(size ?? s.size)), left = Math.max(0, Math.ceil(s.left * n / s.size - .5)), top = Math.max(0, Math.ceil(s.top * n / s.size - .5)), right = Math.min(n, Math.ceil(s.right * n / s.size - .5)), bottom = Math.min(n, Math.ceil(s.bottom * n / s.size - .5));
+        const n = Math.max(1, Math.round(size ?? vfxSprite(key).size));
+        if (this.pressure && n <= 40 && !key.startsWith('crystal:')) {
+            const cell = Math.floor(x / EFFECT_READ_LIMITS.cell) + ':' + Math.floor(y / EFFECT_READ_LIMITS.cell), count = this.cells.get(cell) ?? 0;
+            if (count >= EFFECT_READ_LIMITS.smallPerCell)
+                return;
+            this.cells.set(cell, count + 1);
+        }
+        const s = vfxSprite(key), left = Math.max(0, Math.ceil(s.left * n / s.size - .5)), top = Math.max(0, Math.ceil(s.top * n / s.size - .5)), right = Math.min(n, Math.ceil(s.right * n / s.size - .5)), bottom = Math.min(n, Math.ceil(s.bottom * n / s.size - .5));
         if (right <= left || bottom <= top)
             return;
         const scale = s.size / n;
         ctx.drawImage(s.image, s.x + left * scale, s.y + top * scale, (right - left) * scale, (bottom - top) * scale, Math.round(x - n / 2) + left, Math.round(y - n / 2) + top, right - left, bottom - top);
     }
-    visible(x, y, r = 32) { return this.p.X(x) > -r && this.p.X(x) < this.p.w + r && this.p.Y(y) > -r && this.p.Y(y) < this.p.h + r; }
+    visible(x, y, r = 32) { const xx = this.p.X(x), yy = this.p.Y(y); return xx > -r && xx < this.p.w + r && yy > -r && yy < this.p.h + r; }
     frame(age = 0, loop = false) { return this.p.reduced ? 2 : loop ? Math.floor(this.p.time * (this.p.low ? 6 : 12)) % 4 : Math.min(7, Math.max(0, Math.floor(age * 14))); }
     distort(x, y) { for (const e of this.holes) {
         const dx = x - e.x, dy = y - e.y, d = Math.hypot(dx, dy), r = e.radius;
@@ -391,12 +417,17 @@ export class EffectRenderer {
         for (const shot of s.shots) {
             if (!this.visible(shot.x, shot.y))
                 continue;
-            const tier = Number((this.upgraded.get(shot.weapon) ?? 0) > 0), dir = (Math.round(Math.atan2(shot.vy, shot.vx) / (Math.PI / 4)) + 8) % 8, x = p.X(shot.x), y = p.Y(shot.y), key = `shot:${shot.weapon}:${tier}:${tier ? frame : frame % 3}:${dir}`;
-            if (!p.low && !p.reduced && s.shots.length < 300) {
+            const x = p.X(shot.x), y = p.Y(shot.y), cell = Math.floor(x / EFFECT_READ_LIMITS.cell) + ':' + Math.floor(y / EFFECT_READ_LIMITS.cell);
+            if (this.pressure && (this.cells.get(cell) ?? 0) >= EFFECT_READ_LIMITS.smallPerCell)
+                continue;
+            const tier = Number((this.upgraded.get(shot.weapon) ?? 0) > 0), dir = (Math.round(Math.atan2(shot.vy, shot.vx) / (Math.PI / 4)) + 8) % 8, key = `shot:${shot.weapon}:${tier}:${frame}:${dir}`;
+            if (!p.low && !p.reduced && !this.pressure && s.shots.length < 300) {
                 const a = Math.atan2(shot.vy, shot.vx);
                 this.draw(ctx, key, x - Math.round(Math.cos(a) * 6), y - Math.round(Math.sin(a) * 6), Math.round(size * .6));
             }
             this.draw(ctx, key, x, y, size + (tier ? 4 : 0));
+            if (this.upgraded.get(shot.weapon) === 2 && !this.pressure)
+                this.effect(ctx, { element: shot.weapon === 'missile' ? 'gravity' : shot.weapon === 'flame' ? 'acid' : elementOf(shot.weapon), shape: 'ring', size: 36, duration: 1 }, x, y, p.time, true);
         }
         if (s.player.orbitCount)
             for (let i = 0; i < s.player.orbitCount; i++) {
@@ -406,7 +437,7 @@ export class EffectRenderer {
     }
     field(ctx, e) {
         const p = this.p;
-        if (e.kind === 'splitwarn' || e.kind === 'level' || !this.visible(e.x, e.y, e.radius * p.unit + 40))
+        if (!this.selected.has(e) || e.kind === 'splitwarn' || e.kind === 'level' || this.scene?.combatFields.some(field => field.id === 'stasis' && field.visual === e) || !this.visible(e.x, e.y, e.radius * p.unit + 40))
             return;
         const age = e.life - e.ttl, tier = this.upgraded.get(e.weapon) ?? 0, f = this.frame(age), loop = this.frame(0, true), x = p.X(e.x), y = p.Y(e.y), radius = Math.max(8, Math.round(e.radius * p.unit));
         if (e.kind === 'gravity') {
@@ -430,7 +461,13 @@ export class EffectRenderer {
             return;
         }
         if (e.kind === 'ground') {
-            this.draw(ctx, e.ttl < .2 ? `hit:${e.weapon}:${e.ttl < .1 ? 7 : 6}` : `ground:${e.weapon}:${loop}`, x, y, Math.min(560, radius * 2) * (age < .1 ? .6 + age * 4 : 1));
+            this.draw(ctx, e.ttl < .2 ? `hit:${e.weapon}:${e.ttl < .1 ? 7 : 6}` : `ground:${e.weapon}:${p.reduced ? 2 : Math.floor(p.time * EFFECT_FPS[elementOf(e.weapon)]) % 8}`, x, y, Math.min(560, radius * 2) * (age < .1 ? .6 + age * 4 : 1));
+            if (tier === 2 && !this.pressure)
+                this.effect(ctx, { element: e.weapon === 'flame' ? 'acid' : elementOf(e.weapon), shape: 'ring', size: Math.max(24, Math.min(240, radius * 2)), duration: 1 }, x, y, p.time, true);
+            return;
+        }
+        if (['blast', 'shatter', 'ripple', 'wave'].includes(e.kind)) {
+            this.effect(ctx, { element: e.kind === 'shatter' ? 'ice' : elementOf(e.weapon), shape: e.kind === 'wave' ? 'ring' : 'explosion', size: Math.min(240, Math.max(24, radius * 2)), duration: Math.max(.1, e.life) }, x, y, age, e.kind === 'wave');
             return;
         }
         const kind = e.kind === 'evolve' ? 'ring' : e.kind;
@@ -466,10 +503,12 @@ export class EffectRenderer {
                     }
                 }
             }
+            else if (b.kind === 'kill')
+                this.draw(ctx, `dust:${f}`, x, y, 32 + b.tier * 10);
             else
-                this.draw(ctx, `hit:${b.kind === 'kill' ? 'bomb' : b.weapon}:${f}`, x, y, (b.kind === 'kill' ? 32 : 36) + b.tier * 10);
+                this.draw(ctx, `hit:${b.weapon}:${f}`, x, y, 36 + b.tier * 10);
         }
-        for (let i = 0; i < Math.min(s.particles.length, p.low ? FX_LIMITS.lowParticles : FX_LIMITS.particles); i++) {
+        for (let i = 0; i < Math.min(s.particles.length, this.pressure ? 0 : p.low ? FX_LIMITS.lowParticles : FX_LIMITS.particles); i++) {
             const q = s.particles[i];
             if (!this.visible(q.x, q.y, 10))
                 continue;
@@ -480,8 +519,19 @@ export class EffectRenderer {
     pickups(ctx) {
         const p = this.p;
         for (const g of this.scene?.pickups ?? []) {
-            if (g.kind === 'heal' || !this.visible(g.x, g.y, 14))
+            if (!this.visible(g.x, g.y, 14))
                 continue;
+            if (g.kind === 'heal') {
+                const x = p.X(g.x), y = p.Y(g.y);
+                ctx.fillStyle = FX_PALETTE[0];
+                ctx.fillRect(x - 5, y - 5, 11, 11);
+                ctx.fillStyle = FX_PALETTE[30];
+                ctx.fillRect(x - 4, y - 4, 9, 9);
+                ctx.fillStyle = FX_PALETTE[7];
+                ctx.fillRect(x - 1, y - 3, 3, 7);
+                ctx.fillRect(x - 3, y - 1, 7, 3);
+                continue;
+            }
             const x = p.X(g.x), y = p.Y(g.y), f = p.reduced ? 2 : Math.floor((p.time + g.x * .01) * 8) % 4;
             if (g.pull && !p.reduced) {
                 const dx = p.X(this.scene.player.x) - x, dy = p.Y(this.scene.player.y) - y, d = Math.hypot(dx, dy) || 1;
@@ -529,5 +579,5 @@ export class EffectRenderer {
                 this.draw(ctx, `field:ring:${this.frame(age)}`, p.X(b.x), p.Y(b.y), 50 + rank * 9);
             }
     }
-    counts() { return { bursts: this.bursts.length, limit: this.low ? FX_LIMITS.lowBursts : FX_LIMITS.bursts, ...atlasInfo() }; }
+    counts() { return { bursts: this.bursts.length, limit: this.low ? FX_LIMITS.lowBursts : FX_LIMITS.bursts, visibleFields: this.selected.size, largestField: Math.max(0, ...[...this.selected].map(e => e.radius)), smallCells: Object.fromEntries(this.cells), ...atlasInfo() }; }
 }

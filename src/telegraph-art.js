@@ -85,7 +85,8 @@ export function paintWarning(ctx, q, x, y, unit) {
         return;
     }
     const image = raster(q, unit);
-    ctx.globalAlpha = q.flash ? 1 : q.opacity;
+    const rhythm = q.boss ? (q.progress > .8 ? 1 : Math.floor(q.progress * 6) % 2 ? .8 : 1) : 1;
+    ctx.globalAlpha = q.flash ? 1 : q.opacity * rhythm;
     ctx.drawImage(image.image, Math.round(x + image.left), Math.round(y + image.top));
     ctx.globalAlpha = 1;
 }

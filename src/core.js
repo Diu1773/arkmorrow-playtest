@@ -1,3 +1,4 @@
+import { defaultBindings, parseBindings } from './controls.js';
 import { completeMetaMigration } from './meta-save.js';
 import { migrateEquipment } from './meta-equipment.js';
 import { emptyRooms } from './base-rooms.js';
@@ -9,14 +10,14 @@ import { canFuse, FUSIONS } from './combat-rules.js';
 import { META, PASSIVES, SHIPS, WAVES, WEAPONS } from './data.js';
 import { emptyEquipment, parseEquipment } from './equipment.js';
 import { shardReward, RUN_SKILL_LIMIT } from './economy.js';
-import { AUTO_LIMIT, PASSIVE_LIMIT, SKILL_LIMIT, SKILLS, WEAPON_LEVEL } from './combat-catalog.js';
+import { AUTO_LIMIT, PASSIVE_LIMIT, SKILL_LIMIT, INITIAL_SKILL_SLOTS, SKILLS, WEAPON_LEVEL } from './combat-catalog.js';
 export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 export const xpNeeded = (level) => level === 1 ? 72 : Math.round(level > 25 ? 2693 + (level - 25) * 35 : 68 + level * 10 + level * level * 3.8);
 export const hpScale = (seconds) => 1 + Math.max(0, seconds) * .003;
 export const waveAt = (seconds) => WAVES[clamp(Math.floor(seconds / 60), 0, 9)];
 export function rng(seed) { let a = seed | 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 export const SAVE_KEY = 'cosmos-survivor.save.v2';
-export function defaultSave() { return { story: emptyStory(), version: 6, rooms: emptyRooms(), records: {}, milestones: [], lastMetaLoot: null, migrationRefund: 0, crew: 'pip', specialCleared: [], equipment: migrateEquipment(emptyEquipment()).equipment, shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true, telegraphs: 'boss', movement: 'weighted', lessNotices: false }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
+export function defaultSave() { return { story: emptyStory(), version: 6, rooms: emptyRooms(), records: {}, milestones: [], lastMetaLoot: null, migrationRefund: 0, crew: 'pip', specialCleared: [], equipment: migrateEquipment(emptyEquipment()).equipment, shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true, telegraphs: 'boss', movement: 'weighted', lessNotices: false, bindings: defaultBindings() }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
 const int = (v, max = 1e9) => typeof v === 'number' && Number.isFinite(v) ? clamp(Math.floor(v), 0, max) : 0;
 const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) ? v : {};
 export function parseSave(raw) {
@@ -46,6 +47,7 @@ export function parseSave(raw) {
         for (const item of META)
             save.meta[item.id] = int(meta[item.id], 5);
         const settings = record(data.settings);
+        save.settings.bindings = parseBindings(settings.bindings);
         for (const k of ['volume', 'music', 'sfx', 'shake']) {
             const v = settings[k];
             if (typeof v === 'number' && Number.isFinite(v))
@@ -107,7 +109,7 @@ export function stats(_ship, passives, meta) {
 }
 export function weaponStats(slot, s) { const def = WEAPONS.find(w => w.id === slot.id), level = clamp(slot.level, 1, WEAPON_LEVEL), growth = ['chain', 'blade', 'fan', 'orbit'].includes(slot.id) ? .55 : .3; return { damage: def.damage * (1 + growth * (level - 1)) * s.damage * (slot.evolved ? 1.45 : 1), cooldown: Math.max(.12, def.cooldown * s.cooldown / (1 + .08 * (level - 1))), radius: def.radius * s.area * (1 + .04 * (level - 1)), count: 1 + Number(level >= 3) + Number(level >= 5) + s.multi, duration: s.duration, breakpoint: level >= 5 ? 5 : level >= 3 ? 3 : 1 }; }
 export function canEvolve(slot, passives, _time) { const def = WEAPONS.find(w => w.id === slot.id); return !!def && !slot.evolved && slot.level >= WEAPON_LEVEL && (passives[def.passive] ?? 0) >= 1; }
-export function choices(weapons, passives, time, _chest, random, previous = [], banished = [], skills = []) {
+export function choices(weapons, passives, time, _chest, random, previous = [], banished = [], skills = [], skillCapacity = INITIAL_SKILL_SLOTS) {
     const result = [...weapons.filter(w => canEvolve(w, passives, time)).map((w) => ({ kind: 'evolve', id: w.id })), ...skills.filter(s => s.level >= 5 && !s.evolved).map((s) => ({ kind: 'skillEvolve', id: s.id })), ...FUSIONS.filter(f => canFuse(f.id, weapons, time, skills)).map((f) => ({ kind: 'fusion', id: f.id }))].slice(0, 3);
     const pool = [], full = weapons.reduce((n, w) => n + w.level, 0) + skills.reduce((n, s) => n + s.level, 0) + Object.values(passives).reduce((n, lv) => n + (lv ?? 0), 0) >= RUN_SKILL_LIMIT;
     for (const w of WEAPONS) {
@@ -117,9 +119,11 @@ export function choices(weapons, passives, time, _chest, random, previous = [], 
     }
     for (const skill of SKILLS) {
         const owned = skills.find(s => s.id === skill.id);
-        if (!full && (owned ? owned.level < WEAPON_LEVEL : skills.length < SKILL_LIMIT))
+        if (!full && (owned ? owned.level < WEAPON_LEVEL : skills.length < skillCapacity))
             pool.push({ kind: 'skill', id: skill.id });
     }
+    if (!full && skillCapacity < SKILL_LIMIT)
+        pool.push({ kind: 'skillSlot', id: 'open' });
     for (const p of PASSIVES) {
         const owned = passives[p.id] ?? 0;
         if (!full && (owned ? owned < 6 : Object.keys(passives).length < PASSIVE_LIMIT))

@@ -8,8 +8,8 @@ export function combatText(lang) {
     return { ...d, weaponNames: indices.map(i => d.weaponNames[i]), weaponDescriptions: descriptions, evolutionNames: indices.map(i => d.evolutionNames[i]), evolutionDescriptions: evolved };
 }
 export const combatLabels = (lang) => lang === 'ko' ? {
-    skills: '스킬', auto: '자동 시전', autoHint: '자동 시전 피해 70%. Q·E 또는 버튼으로 직접 쓰면 피해 100%.', dash: '대시', empty: '스킬 획득', evolve: '스킬 진화', ready: '준비', applies: '적용 무기', controls: '대시 Space / Shift · 스킬 Q / E · 패드 B / LB / RB', condition: '무기 5레벨 + 짝 패시브 1레벨',
-} : { skills: 'Skills', auto: 'Auto cast', autoHint: 'Auto cast deals 70% damage. Q/E or buttons deal 100%.', dash: 'Dash', empty: 'Find a skill', evolve: 'Skill evolution', ready: 'Ready', applies: 'Affected weapons', controls: 'Dash Space / Shift · Skills Q / E · Gamepad B / LB / RB', condition: 'Weapon level 5 + partner level 1' };
+    skills: '스킬', auto: '자동 시전', autoHint: '자동 시전 피해 70%. 스킬 키 또는 버튼으로 직접 쓰면 피해 100%.', dash: '대시', empty: '스킬 획득', evolve: '스킬 진화', ready: '준비', applies: '적용 무기', controls: '대시 Space / Shift · 스킬 Q E R F C V · 조작 탭에서 변경', condition: '무기 5레벨 + 짝 패시브 1레벨',
+} : { skills: 'Skills', auto: 'Auto cast', autoHint: 'Auto cast deals 70% damage. Skill keys or buttons deal 100%.', dash: 'Dash', empty: 'Find a skill', evolve: 'Skill evolution', ready: 'Ready', applies: 'Affected weapons', controls: 'Dash Space / Shift · Skills Q E R F C V · Remap in Controls', condition: 'Weapon level 5 + partner level 1' };
 export function combatCopy(lang) {
     const d = originalCombatCopy(lang), ko = lang === 'ko';
     return { ...d, chaos: [ko ? '자동 무기 +2레벨 (최대 5·전체 성장 한도 40), 최대 체력 −20%' : 'Automatic weapons +2 levels (cap 5, total growth budget 40); max HP −20%', ...d.chaos.slice(1)], fusionDescriptions: ko ? ['블랙홀 안에 유성 폭발 추가', '섬광 이동 자리에 전기 울타리 생성', '중력 해머가 얼음 균열을 남김', '반사 보호막이 끝난 자리에 산성 구름 생성'] : ['Meteor blasts inside the black hole', 'Flash Step leaves an electric fence', 'Gravity Hammer leaves frozen fractures', 'Mirror Shield leaves an acid cloud'] };

@@ -4,11 +4,21 @@ const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const worlds = new WeakMap(), states = new WeakMap();
 const homing = new WeakMap(), rebounds = new WeakMap();
 const elites = new WeakMap();
+export const BOSS_TELLS = { fan: .45, spiral: .5, rebound: .5, charge: .5, mines: .55, sweep: .9, rain: .55, corridor: .95, summon: .6, pulse: .55 };
+export const bossTell = (move, phase, tell) => Math.max(.35, BOSS_TELLS[move] - .025 * phase) * tell;
+export function interruptBoss(s, e) { const b = states.get(e); if (!b || b.breakCD > 0 || e.warnTime <= 0)
+    return false; bossWorld(s).threats = bossWorld(s).threats.filter(t => t.owner !== e.id || t.released); e.warnTime = 0; b.next = .65; b.breakCD = 8; return true; }
+export function skipBossIntro(s) { for (const e of s.enemies) {
+    const b = states.get(e);
+    if (b && b.intro < .8)
+        b.intro = .8;
+} s.hitStop = 0; }
 export function bossWorld(s) { let w = worlds.get(s); if (!w) {
     w = { arena: null, threats: [], remains: [], bounces: 0, history: [] };
     worlds.set(s, w);
 } return w; }
 export const bossState = (e) => states.get(e);
+export function bossEntryPoint(s) { const halfW = clamp(s.viewWidth * .55, 440, 1100), halfH = clamp(s.viewHeight * .55, 350, 1100), x = clamp(s.player.x, halfW + 35, 4765 - halfW), y = clamp(s.player.y, halfH + 35, 3165 - halfH); return { x: clamp(s.player.x + 260, x - halfW + 100, x + halfW - 100), y: clamp(s.player.y - 170, y - halfH + 100, y + halfH - 100) }; }
 export function arenaPoint(s, point, margin = 55) { const a = worlds.get(s)?.arena; if (a && a.release < 0) {
     point.x = clamp(point.x, a.x - a.halfW + margin, a.x + a.halfW - margin);
     point.y = clamp(point.y, a.y - a.halfH + margin, a.y + a.halfH - margin);
@@ -73,10 +83,12 @@ export function setupBoss(s, e) {
     const design = bossDesign(s.chapter.id), variant = e.role === 'final' ? 2 : e.bossArt === 7 ? 1 : 0;
     e.hp = e.maxHp = design.hp[variant] * s.mode.hp;
     e.r = variant === 2 ? 56 : 40;
-    e.speed = variant === 2 ? 128 : 145;
+    e.speed = variant === 2 ? 155 : 170;
     e.damage = variant === 2 ? 12 : 9;
-    e.timer = 2.1;
-    states.set(e, { design, variant, recent: [], casts: 0, phase: 0, intro: 0, dash: 0, heading: 0, next: 2.1, move: null });
+    e.timer = 1.1;
+    e.stages = 3;
+    s.hitStop = Math.max(s.hitStop, .12);
+    states.set(e, { design, variant, recent: [], casts: 0, phase: 0, intro: 0, dash: 0, heading: 0, next: 1.1, move: null, breakCD: 0 });
     const w = bossWorld(s), halfW = clamp(s.viewWidth * .55, 440, 1100), halfH = clamp(s.viewHeight * .55, 350, 1100);
     const x = clamp(s.player.x, halfW + 35, 4765 - halfW), y = clamp(s.player.y, halfH + 35, 3165 - halfH);
     w.arena = { x, y, halfW, halfH, age: 0, release: -1, owner: e.id };
@@ -98,13 +110,14 @@ export function setupBoss(s, e) {
     s.player.y = clamp(s.player.y, y - halfH + 60, y + halfH - 60);
     for (const point of [...s.pickups, ...s.drops, ...s.beacon ? [s.beacon] : []])
         arenaPoint(s, point);
-    e.x = clamp(s.player.x + 260, x - halfW + 100, x + halfW - 100);
-    e.y = clamp(s.player.y - 170, y - halfH + 100, y + halfH - 100);
+    const entry = bossEntryPoint(s);
+    e.x = entry.x;
+    e.y = entry.y;
     s.player.invul = Math.max(s.player.invul, 2.1);
 }
 export function bossMoves(e) { const b = states.get(e); if (!b)
-    return []; const moves = b.variant === 2 ? [...b.design.moves] : middleMoves(b.design, b.variant === 1); return moves.slice(0, b.variant === 2 ? 4 + e.phase : 3 + e.phase); }
-export function chooseBossMove(s, e) { const b = states.get(e); const all = bossMoves(e), available = all.filter(m => !b.recent.includes(m)); const move = available[Math.floor(s.combatRandom() * available.length)]; b.recent = [...b.recent.slice(-1), move]; return move; }
+    return []; const moves = b.variant === 2 ? [...b.design.moves] : middleMoves(b.design, b.variant === 1); return moves.slice(0, b.variant === 2 ? 4 + e.phase : 2 + e.phase); }
+export function chooseBossMove(s, e) { const b = states.get(e); const all = bossMoves(e), filtered = all.filter(m => !b.recent.includes(m)), available = filtered.length ? filtered : all.filter(m => m !== b.recent.at(-1)), order = b.variant === 2 ? b.design.moves : middleMoves(b.design, b.variant === 1), linked = order[(order.indexOf(b.move) + 1) % order.length]; const move = b.casts % 2 === 1 && available.includes(linked) ? linked : available[Math.floor(s.combatRandom() * available.length)]; b.recent = [...b.recent.slice(-1), move]; return move; }
 export function castBossMove(s, e, move) {
     const b = states.get(e), w = bossWorld(s), a = w.arena, p = s.player, angle = Math.atan2(p.y - e.y, p.x - e.x), damage = e.damage * s.mode.damage, phase = e.phase;
     b.move = move;
@@ -112,7 +125,7 @@ export function castBossMove(s, e, move) {
     w.history.push({ id: e.id, move, phase, at: s.time });
     if (w.history.length > 200)
         w.history.shift();
-    e.warnTime = e.warnDuration = Math.max(.8, 1.12 - phase * .1) * s.mode.tell;
+    e.warnTime = e.warnDuration = bossTell(move, phase, s.mode.tell);
     e.attackFlash = 0;
     s.emit('warning', e.x, e.y);
     const threat = (kind, extra = {}) => w.threats.push({ kind, move, x: e.x, y: e.y, angle, radius: 90, width: 28, length: Math.max(a.halfW, a.halfH) * 2.5, age: 0, warning: e.warnDuration, duration: .2, damage, phase, spin: 0, released: false, owner: e.id, sourceX: e.x, sourceY: e.y, ...extra });
@@ -126,16 +139,17 @@ export function castBossMove(s, e, move) {
         threat('beam', { angle: angle - .4, width: 26, duration: 1.5, spin: -.75 });
     if (move === 'mines' || move === 'rain') {
         const count = move === 'rain' ? 5 : 3;
+        const escape = Math.atan2(a.y - p.y, a.x - p.x), side = escape + Math.PI / 2;
         for (let i = 0; i < count; i++) {
-            const dx = move === 'rain' ? (i - 2) * 100 : Math.cos(angle + i * 2.1) * 110, dy = move === 'rain' ? Math.sin(i * 1.6) * 75 : Math.sin(angle + i * 2.1) * 110;
-            threat('disk', { x: clamp(p.x + dx, a.x - a.halfW + 100, a.x + a.halfW - 100), y: clamp(p.y + dy, a.y - a.halfH + 100, a.y + a.halfH - 100), radius: move === 'rain' ? 62 : 80, warning: e.warnDuration + i * .28, duration: .32 });
+            const offset = i === 0 ? 0 : i === 1 ? 190 : -190, dx = move === 'rain' ? (i - 2) * 100 : Math.cos(side) * offset, dy = move === 'rain' ? Math.sin(i * 1.6) * 75 : Math.sin(side) * offset;
+            threat('disk', { x: clamp(p.x + dx, a.x - a.halfW + 25, a.x + a.halfW - 25), y: clamp(p.y + dy, a.y - a.halfH + 25, a.y + a.halfH - 25), radius: move === 'rain' ? 62 : 80, age: -i * .1, duration: .32 });
         }
     }
     if (move === 'corridor')
         threat('corridor', { x: a.x, y: clamp(p.y, a.y - a.halfH + 220, a.y + a.halfH - 220), width: Math.min(230, a.halfH * .6), radius: Math.min(105, a.halfH * .25), duration: 2.4, spin: .75, angle: 0 });
     if (move === 'summon')
         threat('summon', { x: a.x, y: a.y, radius: Math.min(a.halfW, a.halfH) - 110, duration: .02, angle: 0 });
-    b.next = e.warnDuration + Math.max(1.7, 3 - phase * .45);
+    b.next = Math.max(...w.threats.filter(t => t.owner === e.id).map(t => t.warning + t.duration - t.age)) + (b.casts % 2 === 1 ? .22 : .65) - phase * .06;
     e.timer = b.next;
 }
 export function updateBoss(s, e, dt) {
@@ -144,10 +158,11 @@ export function updateBoss(s, e, dt) {
         return false;
     b.intro += dt;
     b.next -= dt;
+    b.breakCD = Math.max(0, b.breakCD - dt);
     e.warnTime = Math.max(0, e.warnTime - dt);
     e.angle = Math.atan2(s.player.y - e.y, s.player.x - e.x);
-    if (b.intro < 1.8) {
-        if (b.intro >= 1.1 && b.intro - dt < 1.1) {
+    if (b.intro < .8) {
+        if (b.intro >= .35 && b.intro - dt < .35) {
             s.shake = 8;
             s.emit('impact', e.x, e.y, 1);
         }
@@ -166,7 +181,7 @@ export function updateBoss(s, e, dt) {
     if (!arena)
         return true;
     if (b.dash > 0) {
-        const travel = Math.min(b.dash, 650 * dt);
+        const travel = Math.min(b.dash, 720 * dt);
         b.dash -= travel;
         e.x += Math.cos(b.heading) * travel;
         e.y += Math.sin(b.heading) * travel;
@@ -231,7 +246,7 @@ export function threatHits(t, x, y, r, age = t.age) {
         return along >= -r && along < t.length + r && Math.abs(across) < t.width / 2 + r;
     }
     if (t.kind === 'ring') {
-        const radius = t.radius + elapsed * 190;
+        const radius = t.radius + elapsed * 215;
         return Math.abs(Math.hypot(dx, dy) - radius) < t.width / 2 + r && angleDistance(Math.atan2(dy, dx), t.angle + t.spin * elapsed) > .55;
     }
     if (t.kind === 'corridor') {
@@ -247,7 +262,7 @@ function release(s, t) {
     e.attackFlash = 1 / 30;
     const shot = (angle, speed, kind = 'pulse', x = t.x, y = t.y) => { const damage = Math.min(t.damage, s.player.maxHp * .24 / ((s.chapter?.damage ?? 1) * s.chaos.incoming)), b = s.fire(x, y, angle, speed, damage, true, kind, '#ff80a2', kind === 'ricochet' ? 4.5 : 3.4); if (b && t.move === 'rain')
         homing.set(b, .65); return b; };
-    const speed = 215 + t.phase * 24;
+    const speed = (270 + t.phase * 32) * s.mode.speed;
     if (t.move === 'fan')
         for (let wave = 0; wave < 2; wave++)
             for (let i = 0; i < 7 + t.phase * 2; i++)
@@ -277,7 +292,7 @@ function release(s, t) {
             }
         }
     if (t.move === 'rain')
-        shot(Math.atan2(s.player.y - t.y, s.player.x - t.x), 160, 'seeker');
+        shot(Math.atan2(s.player.y - t.y, s.player.x - t.x), 200 * s.mode.speed, 'seeker');
 }
 export function updateBossWorld(s, dt) {
     const w = worlds.get(s);
@@ -305,7 +320,7 @@ export function updateBossWorld(s, dt) {
         if (t.move === 'spiral' && t.age >= t.warning && Math.floor((t.age - t.warning) * 10) > Math.floor(Math.max(-.01, before - t.warning) * 10)) {
             for (let k = 0; k < 3; k++) {
                 const a = t.angle + k * TAU / 3 + (t.age - t.warning) * 3.4;
-                s.fire(t.x, t.y, a, 215 + t.phase * 24, Math.min(t.damage, s.player.maxHp * .24 / ((s.chapter?.damage ?? 1) * s.chaos.incoming)), true, 'pulse', '#ff80a2', 3.4);
+                s.fire(t.x, t.y, a, (270 + t.phase * 32) * s.mode.speed, Math.min(t.damage, s.player.maxHp * .24 / ((s.chapter?.damage ?? 1) * s.chaos.incoming)), true, 'pulse', '#ff80a2', 3.4);
             }
         }
         if (threatHits(t, s.player.x, s.player.y, s.player.r))
@@ -324,9 +339,9 @@ export function bossWarningShapes(s) {
         return [];
     const out = [];
     for (const t of w.threats) {
-        if (t.age > t.warning + 1 / 30)
+        if (t.age < 0 || t.age > t.warning + 1 / 30)
             continue;
-        const progress = clamp(t.age / t.warning, 0, 1), q = { kind: 'disk', x: t.x, y: t.y, angle: t.angle, radius: t.radius, width: t.width, length: t.length, gaps: [], gapWidth: 0, gap: 0, progress, flash: t.age >= t.warning, boss: true, floor: true, opacity: .75, color: '#c47a87', sourceX: t.sourceX, sourceY: t.sourceY };
+        const progress = clamp(t.age / t.warning, 0, 1), q = { kind: 'disk', x: t.x, y: t.y, angle: t.angle, radius: t.radius, width: t.width, length: t.length, gaps: [], gapWidth: 0, gap: 0, progress, flash: t.age >= t.warning, boss: true, floor: true, opacity: .85, color: progress > .8 ? '#ffe1a3' : '#e590a0', sourceX: t.sourceX, sourceY: t.sourceY };
         if (t.kind === 'charge')
             q.kind = 'strip';
         if (t.kind === 'beam') {

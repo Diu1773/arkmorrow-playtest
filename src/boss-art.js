@@ -362,13 +362,13 @@ export function paintBoss(c, _s, e, x, y, unit, reduced = false) {
     if (!b)
         return false;
     const image = bossFrame(b.design, b.variant, e.phase, reduced ? 0 : Math.floor(e.age * 5) % 3, e.flash > 0 || e.attackFlash > 0), size = image.width, worldSize = size * (b.variant === 2 ? 2.65 : 3.6);
-    const landing = b.intro < 1.1 ? Math.max(0, (1.1 - b.intro) / 1.1) : 0, offset = reduced ? 0 : landing * (c.canvas.height + size * unit * 3);
-    const width = Math.max(1, Math.round(worldSize * unit)), squash = !reduced && b.intro >= 1.1 && b.intro < 1.3 ? .85 : 1;
+    const landing = b.intro < .35 ? Math.max(0, (.35 - b.intro) / .35) : 0, offset = reduced ? 0 : landing * (c.canvas.height + size * unit * 3);
+    const width = Math.max(1, Math.round(worldSize * unit)), squash = !reduced && b.intro >= .35 && b.intro < .5 ? .85 : 1;
     c.fillStyle = '#0c101a';
     c.globalAlpha = .45;
     for (let yy = -3; yy <= 3; yy++)
         c.fillRect(Math.round(x - width * .35 + Math.abs(yy) * 2), Math.round(y + width * .3 + yy), Math.round(width * .7 - Math.abs(yy) * 4), 1);
-    c.globalAlpha = b.intro < .3 ? 0 : 1;
+    c.globalAlpha = b.intro < .1 ? 0 : 1;
     c.drawImage(image, Math.round(x - width / 2), Math.round(y - width / 2 - offset), width, Math.round(width * squash));
     c.globalAlpha = 1;
     return true;
@@ -378,6 +378,25 @@ export function paintBossArena(c, s, X, Y, unit) {
     if (!a)
         return;
     const alpha = a.release >= 0 ? Math.max(0, 1 - a.release / 1.2) : Math.min(1, a.age / .7), left = X(a.x - a.halfW), right = X(a.x + a.halfW), top = Y(a.y - a.halfH), bottom = Y(a.y + a.halfH);
+    const boss = s.enemies.find(e => e.id === a.owner), phase = boss?.role === 'final' ? boss.phase : 0;
+    c.fillStyle = ['#28344b', '#5a2848', '#793d30'][phase];
+    c.globalAlpha = .07 * alpha;
+    c.fillRect(left, top, right - left, bottom - top);
+    c.globalAlpha = 1;
+    if (phase > 0) {
+        c.strokeStyle = phase === 1 ? '#bd82ee' : '#f0a33a';
+        c.lineWidth = 2;
+        c.beginPath();
+        const cut = phase === 1 ? 18 : 42;
+        for (const [i, [x, y]] of [[left + cut, top + 5], [right - cut, top + 5], [right - 5, top + cut], [right - 5, bottom - cut], [right - cut, bottom - 5], [left + cut, bottom - 5], [left + 5, bottom - cut], [left + 5, top + cut]].entries()) {
+            if (i === 0)
+                c.moveTo(x, y);
+            else
+                c.lineTo(x, y);
+        }
+        c.closePath();
+        c.stroke();
+    }
     c.globalAlpha = .8 * alpha;
     c.fillStyle = '#695375';
     c.fillRect(left, top, right - left, 2);
@@ -406,6 +425,14 @@ export function paintBossArena(c, s, X, Y, unit) {
 }
 export function paintBossThreats(c, s, X, Y, unit) {
     const w = bossWorld(s);
+    const arrow = (x, y) => { const xx = X(x), yy = Y(y), cx = c.canvas.width / 2, cy = c.canvas.height / 2; if (xx >= 12 && xx <= cx * 2 - 12 && yy >= 12 && yy <= cy * 2 - 12)
+        return; const dx = xx - cx, dy = yy - cy, k = Math.min((cx - 18) / Math.max(.01, Math.abs(dx)), (cy - 18) / Math.max(.01, Math.abs(dy))), a = Math.atan2(dy, dx); c.save(); c.translate(Math.round(cx + dx * k), Math.round(cy + dy * k)); c.rotate(a); c.fillStyle = '#ffe1a3'; c.beginPath(); c.moveTo(9, 0); c.lineTo(-6, -6); c.lineTo(-6, 6); c.closePath(); c.fill(); c.restore(); };
+    for (const t of w.threats)
+        if (t.age >= 0 && t.age < t.warning)
+            arrow(t.sourceX, t.sourceY);
+    for (const b of s.bullets)
+        if (!b.reflected && (s.player.x - b.x) * b.vx + (s.player.y - b.y) * b.vy > 0 && Math.hypot(b.x - s.player.x, b.y - s.player.y) < Math.max(s.viewWidth, s.viewHeight))
+            arrow(b.x, b.y);
     const strip = (x, y, angle, length, width) => {
         const n = Math.ceil(length / 9);
         for (let i = 0; i <= n; i++) {
@@ -439,7 +466,7 @@ export function paintBossThreats(c, s, X, Y, unit) {
             }
         }
         if (t.kind === 'ring') {
-            const radius = t.radius + elapsed * 190;
+            const radius = t.radius + elapsed * 215;
             for (let i = 0; i < 120; i++) {
                 const a = i / 120 * Math.PI * 2, delta = Math.atan2(Math.sin(a - t.angle - t.spin * elapsed), Math.cos(a - t.angle - t.spin * elapsed));
                 if (Math.abs(delta) < .55)

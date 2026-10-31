@@ -189,14 +189,14 @@ export function render(G,V,settings={}){setup();if(!ctx||ctx.lost)return;if(canv
  enlarged=settings.largeProjectiles!==false;
  const p=G.player,opacity=clamp(settings.effectsOpacity??.75,.1,1)*(crowded?.65:1);
  layer(()=>{vfx.projectiles(ctx);vfx.effects(ctx);},opacity);floaters(G);darkness(G);
- vfx.pickups(ctx);for(const g of G.pickups||[])if(g.kind==='heal')stamp('icon:heal',g.x,g.y,32);
+ vfx.pickups(ctx);
  ctx.globalAlpha=opacity;vfx.chests(ctx);ctx.globalAlpha=1;
  const b=G.beacon;if(b?.hp>0){stamp('beacon',b.x,b.y,b.r*3);hpBar(b,b.r*2,b.y+b.r*1.7,'#8fc6ad');}
- hazards(G);paintBossThreats(ctx,G,X,Y,unit);enemyWarnings(G,settings);arrows(G);
- drawSkillFields(ctx,G,{X,Y,unit,time:v.time,reduced:settings.reduced});
+ layer(()=>drawSkillFields(ctx,G,{X,Y,unit,time:v.time,reduced:settings.reduced}),opacity);
  if(p)player(G,p,settings);
- pixelBatch(G.bullets||[],b=>'bullet'+(Math.floor(v.time*8+(b.age||0)*2)%2===0?':spark':''),undefined,enlarged?1:.75);
  if(intro>=0&&intro<1.2){ctx.globalAlpha=.2*Math.sin(intro/1.2*Math.PI);rect(0,0,cw,ch,'#080a16');ctx.globalAlpha=1;}
+ hazards(G);paintBossThreats(ctx,G,X,Y,unit);enemyWarnings(G,settings);arrows(G);
+ pixelBatch(G.bullets||[],b=>'bullet'+(Math.floor(v.time*8+(b.age||0)*2)%2===0?':spark':''),undefined,enlarged?1:.75);
  minimap(G);ctx.flush?.();
 }
 export function snapshotShip(id,target){if(!target)return;const c=target.getContext('2d'),img=sprite('ship:'+id,1,0),scale=Math.max(1,Math.floor(Math.min(target.width/40,target.height/32)));c.imageSmoothingEnabled=false;c.clearRect(0,0,target.width,target.height);c.drawImage(img,Math.floor((target.width-48*scale)/2),Math.floor((target.height-48*scale)/2),48*scale,48*scale);}

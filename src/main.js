@@ -11,6 +11,9 @@ import { CHAPTER_SECONDS, CHAPTER_BOSSES } from './encounters.js';
 import { skillIcon, drawCombatIcons } from './combat-art.js';
 import { combatText, combatLabels, combatCopy } from './combat-copy.js';
 import { combatControls, updateCombatControls, passiveApplication } from './combat-ui.js';
+import { ACTIONS, bindControl, bindingLabel, controlLabel, controlAmount, controlsUI, defaultBindings } from './controls.js';
+import { incomingBoss } from './encounters.js';
+import { bossState, skipBossIntro } from './boss-director.js';
 import { SKILLS, CREW_SKILL, skillDef } from './combat-catalog.js';
 import { CombatNotice } from './notices.js';
 import { fieldScale } from './horde.js';
@@ -48,6 +51,9 @@ catch {
 const parsed = parseSave(storageRaw);
 let save = parsed.save, view = 'intro', sim = null, selectedSector = 0, difficulty = 'normal', offers = [], chest = false, banishing = false, returnView = 'title', shopReturn = 'title', preview = false;
 let practice = null, introAt = performance.now();
+let padPauseBefore = false;
+let settingsTab = 'general', bindingCapture = null, bindingMessage = '';
+const mouseButtons = new Set();
 const keys = new Set(), pointer = { down: false, aim: false, x: 0, y: 0 }, joy = { x: 0, y: 0, id: -1, originX: 0, originY: 0 }, audio = new AudioEngine(save.settings);
 let lastSkill = null;
 let lastFusion = -1;
@@ -66,7 +72,7 @@ try {
     largeProjectiles = localStorage.getItem('cosmos-survivor.projectiles.v1') !== '0';
 }
 catch { /* A missing visual preference uses the readable default. */ }
-let skillPressed = [false, false], autoCast = true;
+let skillPressed = Array(6).fill(false), autoCast = true;
 try {
     autoCast = localStorage.getItem('cosmos-survivor.auto-cast.v1') !== '0';
 }
@@ -126,11 +132,11 @@ function persist() { if (preview || parsed.future || storageReadFailed)
 catch {
     toast(tr('saveWarning'));
 } }
-function resetInput() { frameStats.break(); const stick = document.getElementById('joystick'); stick?.classList.remove('active'); stick?.removeAttribute('style'); keys.clear(); pointer.down = pointer.aim = false; joy.x = joy.y = 0; joy.id = -1; dashPressed = false; skillPressed = [false, false]; acc = 0; }
+function resetInput() { frameStats.break(); const stick = document.getElementById('joystick'); stick?.classList.remove('active'); stick?.removeAttribute('style'); keys.clear(); mouseButtons.clear(); pointer.down = pointer.aim = false; joy.x = joy.y = 0; joy.id = -1; dashPressed = false; skillPressed = Array(6).fill(false); acc = 0; }
 function focusFirst() { (app.querySelector('.meta-sheet button:not(:disabled),.meta-sheet select') ?? app.querySelector('[data-autofocus]:not(:disabled)') ?? app.querySelector('button:not(:disabled),select,input'))?.focus({ preventScroll: true }); }
 function visibleEnemies() { return sim?.enemies.reduce((n, e) => n + Number(e.hp > 0 && !e.hidden && Math.abs(e.x - V.camX) < V.w / V.scale / 2 + e.r && Math.abs(e.y - V.camY) < V.h / V.scale / 2 + e.r), 0) ?? 0; }
 function setView(next) { document.getElementById('toast')?.setAttribute('hidden', ''); toastUntil = 0; app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(view === 'intro' ? 'title' : view === 'title' || view === 'practice' ? 'refuge' : view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim)
-    audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id); drawUI(); }
+    audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id, sim.player, sim.enemies.find(e => e.type === 'boss' && e.hp > 0)?.bossArt); drawUI(); }
 function drawIcons() {
     for (const ca of app.querySelectorAll('[data-crew]')) {
         const c = ca.getContext('2d');
@@ -143,8 +149,9 @@ function drawIcons() {
 }
 function launchUI() { const ko = save.settings.lang === 'ko', ch = chapterDef(special ? 'village' : selectedSector), ready = `<div class="launch-ready"><div><h3>${special ? (ko ? '시골 마을' : 'Country Village') : ch[save.settings.lang]}</h3><p>${CREW.find(c => c.id === save.crew).name} / ${ko ? '전투력' : 'Power'} ${combatPower(save)} / ${ko ? '권장' : 'Recommended'} ${ch.recommended}</p></div><div class="launch-panel"><select id="difficulty" aria-label="${tr('difficulty')}">${['easy', 'normal', 'hard'].map(k => `<option value="${k}" ${difficulty === k ? 'selected' : ''} ${difficultyOpen(save, special ? 'village' : String(selectedSector), k) ? '' : 'disabled'}>${tr(k)} &#215;${DIFFICULTY_REWARDS[k].toFixed(1)}</option>`).join('')}</select>${btn('start', tr('launch'), 'primary launch', 'data-autofocus')}</div></div>`; return chapterUI(save, selectedSector, ready) + `<div class="button-row">${btn('special', ko ? '\uC2A4\uD398\uC15C \uD0D0\uC0AC' : 'Special expeditions')}</div>`; }
 function specialUI() { const ko = save.settings.lang === 'ko', open = save.equipment.cleared.includes(1); return heading(ko ? '스페셜' : 'Special') + `<div class="special-landscape"><p class="meta-stars ${save.records.village?.clears.hard ? 'gold-record' : ''}">${starMarks(save.records.village?.stars ?? 0)}</p><h3>${ko ? '시골 마을' : 'Country Village'}</h3><p>${ko ? '들판에 떨어진 운석. 허수아비가 먼저 움직였다.' : 'A meteor landed. The scarecrow moved first.'}</p><p>${open ? (ko ? '본편과 별도 탐사 / HARVEST 배낭' : 'Separate expedition / HARVEST Pack') : (ko ? '본편 챕터 2 대기권 클리어 후 열림' : 'Clear story chapter 2 to unlock')}</p>${btn('special-pick', ko ? '시골 마을로' : 'Visit village', 'primary', open ? '' : 'disabled')}</div>`; }
-function hudUI() { return `<section id="hud" aria-label="${tr('hp')}"><div class="mission-box panel"><h2 id="hud-sector"></h2></div><div class="run-progress" role="progressbar" aria-label="${save.settings.lang === 'ko' ? '챕터 진행' : 'Chapter progress'}" aria-valuemin="0" aria-valuemax="100"><i id="run-fill"></i>${(sim?.encounters ?? CHAPTER_BOSSES).map((b, i) => `<span class="boss-marker ${b.role === 'final' ? 'final' : ''}" style="left:${b.at / (sim?.duration ?? CHAPTER_SECONDS) * 100}%" title="${clock(b.at)}" aria-label="${clock(b.at)} ${b.role === 'final' ? tr('boss') : tr('middle')}" data-at="${b.at}" data-boss="${i}">${b.role === 'final' ? '◆' : '◇'}</span>`).join('')}<b id="run-percent"></b></div><div class="hud-actions">${btn('pause', '&#8545;', 'icon-btn', `aria-label="${tr('pause')}"`)}${btn('fullscreen', tr('fullscreen'), 'small')}</div><div id="upgrade-chips"></div><div class="minimap-wrap panel"><div><span>${tr('minimap')}</span><span id="map-time"></span></div><canvas id="minimap" width="90" height="60" aria-label="${tr('minimap')}"></canvas></div><div id="bossbar" class="panel" hidden><div><b id="boss-name"></b><span id="boss-phase"></span></div><div class="meter"><i id="boss-fill"></i></div></div><div id="incoming" role="status" aria-live="polite" hidden><span id="incoming-kind"></span><b id="incoming-count"></b></div><div id="danger-label" hidden>${tr('warning')}</div><div id="objective-label"></div><div class="status-box panel" id="status-box"><div class="lv-badge"><small>${tr('level')}</small><b id="hud-level"></b></div><div class="bars"><div class="bar-row"><span>${tr('hp')}</span><div class="meter hp"><i id="hp-fill"></i><em id="hud-hp"></em></div></div><div class="bar-row"><span>${tr('xp')}</span><div class="meter xp"><i id="xp-fill"></i><em id="hud-xp"></em></div></div></div><div class="ship-tag"><b id="hud-ship"></b><span id="hud-time"></span></div></div><div id="joystick" role="group" aria-label="${tr('move')}"><div id="stick"></div><span>${tr('move')}</span></div><button id="dash-btn" aria-label="${tr('dash')}"><b>&#8599;</b><span id="dash-text">${tr('dash')}</span></button>${combatControls(save.settings.lang, sim?.autoCast ?? autoCast)}<span id="perf" hidden></span></section>`; }
-function choiceText(c) { const d = dict(); if (c.kind === 'chaos')
+function hudUI() { return `<section id="hud" aria-label="${tr('hp')}"><div class="mission-box panel"><h2 id="hud-sector"></h2></div><div class="run-progress" role="progressbar" aria-label="${save.settings.lang === 'ko' ? '챕터 진행' : 'Chapter progress'}" aria-valuemin="0" aria-valuemax="100"><i id="run-fill"></i>${(sim?.encounters ?? CHAPTER_BOSSES).map((b, i) => `<span class="boss-marker ${b.role === 'final' ? 'final' : ''}" style="left:${b.at / (sim?.duration ?? CHAPTER_SECONDS) * 100}%" title="${clock(b.at)}" aria-label="${clock(b.at)} ${b.role === 'final' ? tr('boss') : tr('middle')}" data-at="${b.at}" data-boss="${i}">${b.role === 'final' ? '◆' : '◇'}</span>`).join('')}<b id="run-percent"></b></div><div class="hud-actions">${btn('pause', '&#8545;', 'icon-btn', `aria-label="${tr('pause')}"`)}${btn('fullscreen', tr('fullscreen'), 'small')}</div><div id="upgrade-chips"></div><div class="minimap-wrap panel"><div><span>${tr('minimap')}</span><span id="map-time"></span></div><canvas id="minimap" width="90" height="60" aria-label="${tr('minimap')}"></canvas></div><div id="bossbar" class="panel" hidden><div><b id="boss-name"></b><span id="boss-phase"></span></div><div class="meter"><i id="boss-fill"></i></div></div><div id="boss-alert" role="status" aria-live="assertive" hidden></div><div id="boss-intro" hidden><b></b><button type="button" data-act="skip-boss"></button></div><div id="incoming" role="status" aria-live="polite" hidden><span id="incoming-kind"></span><b id="incoming-count"></b></div><div id="danger-label" hidden>${tr('warning')}</div><div id="objective-label"></div><div class="status-box panel" id="status-box"><div class="lv-badge"><small>${tr('level')}</small><b id="hud-level"></b></div><div class="bars"><div class="bar-row"><span>${tr('hp')}</span><div class="meter hp"><i id="hp-fill"></i><em id="hud-hp"></em></div></div><div class="bar-row"><span>${tr('xp')}</span><div class="meter xp"><i id="xp-fill"></i><em id="hud-xp"></em></div></div></div><div class="ship-tag"><b id="hud-ship"></b><span id="hud-time"></span></div></div><div id="joystick" role="group" aria-label="${tr('move')}"><div id="stick"></div><span>${tr('move')}</span></div><button id="dash-btn" aria-label="${tr('dash')}"><b>&#8599;</b><span id="dash-text">${tr('dash')}</span></button>${combatControls(save.settings.lang, sim?.autoCast ?? autoCast, sim?.skillCapacity ?? 2, save.settings.bindings)}<span id="perf" hidden></span></section>`; }
+function choiceText(c) { const d = dict(); if (c.kind === 'skillSlot')
+    return { name: save.settings.lang === 'ko' ? '스킬 칸 열기' : 'Open skill slot', desc: save.settings.lang === 'ko' ? `스킬을 하나 더 장착할 수 있습니다. (${sim.skillCapacity}/6 → ${sim.skillCapacity + 1}/6)` : `Equip one more skill. (${sim.skillCapacity}/6 → ${sim.skillCapacity + 1}/6)`, rank: 0, new: true, kind: combatLabels(save.settings.lang).skills, icon: skillIcon('barrier') }; if (c.kind === 'chaos')
     return { name: 'CHAOS', desc: combatCopy(save.settings.lang).chaos[Number(c.id)], rank: 0, new: false, kind: 'CHAOS', icon: icon('chest') }; if (c.kind === 'fusion') {
     const f = FUSIONS.find(f => f.id === c.id);
     return { name: combatCopy(save.settings.lang).fusionNames[FUSIONS.indexOf(f)], desc: combatCopy(save.settings.lang).fusionDescriptions[FUSIONS.indexOf(f)], rank: 8, new: false, kind: combatCopy(save.settings.lang).fusion, icon: icon(f.a, true) };
@@ -163,6 +170,8 @@ function choiceText(c) { const d = dict(); if (c.kind === 'chaos')
 } return { name: tr(c.kind === 'heal' ? 'heal' : 'dustBonus'), desc: tr(c.kind === 'heal' ? 'healDesc' : 'dustDesc'), rank: 0, new: false, kind: tr('chest'), icon: icon(c.kind === 'heal' ? 'heal' : 'shards') }; }
 const pips = (level, max = 5) => `<span class="rank-pips" aria-label="${tr('level')} ${level}">${Array.from({ length: max }, (_, i) => `<i class="${i < level ? 'filled' : ''}"></i>`).join('')}</span>`;
 function choiceChange(c) {
+    if (c.kind === 'skillSlot')
+        return { rank: `${sim.skillCapacity} → ${sim.skillCapacity + 1}`, gain: save.settings.lang === 'ko' ? '최대 6칸' : 'Up to six slots' };
     if (c.kind === 'skill' || c.kind === 'skillEvolve') {
         const slot = sim.skills.find(s => s.id === c.id);
         return { rank: c.kind === 'skillEvolve' ? '5 ★' : `${slot?.level ?? 0} → ${(slot?.level ?? 0) + 1}`, gain: skillDef(c.id)[save.settings.lang] };
@@ -196,7 +205,8 @@ function choiceChange(c) {
     return { rank: '', gain: '' };
 }
 function choiceUI() { return heading(chest ? rankCopy[sim.chestRank][save.settings.lang] + ' ' + tr('chest') + ' / ' + combatCopy(save.settings.lang).remaining + ' ' + (sim.chestQueue[0]?.remaining ?? 1) : tr('levelup'), banishing ? tr('banishHint') : tr('pick'), false) + `<div class="upgrade-grid">${offers.map((c, i) => { const x = choiceText(c), change = choiceChange(c); return `<button class="upgrade-card ${c.kind === 'evolve' || c.kind === 'fusion' || c.kind === 'chaos' ? 'evolve-card' : c.kind === 'passive' ? 'passive-card' : 'weapon-card'}" data-act="choose" data-id="${i}" style="--order:${i}" ${banishing && !['weapon', 'skill', 'passive'].includes(c.kind) ? 'disabled' : ''}><div class="card-cap"><span>${x.kind}</span><kbd>${i + 1}</kbd></div><div class="item-portrait">${x.icon}${x.new ? '<b class="new-tag">NEW</b>' : ''}</div><h3>${x.name}</h3>${x.rank ? pips(x.rank, c.kind === 'passive' ? 6 : 5) : ''}<p class="card-level">${change.rank}</p><p>${x.desc}</p><p class="upgrade-gain">${change.gain}</p>${choiceDetails(sim, c, save.settings.lang)}</button>`; }).join('')}</div><div class="button-row">${btn('reroll', tr('reroll') + ` (${sim.rerolls})`, '', sim.rerolls <= 0 ? 'disabled' : '')}${btn('skip-cue', tr('skipCue'), 'quiet')}${btn('banish', tr(banishing ? 'cancel' : 'banish') + ` (${sim.banishes})`, 'quiet', sim.banishes <= 0 ? 'disabled' : '')}</div>`; }
-function settingsUI() { return heading(tr('settings')) + `${DEV || PLAYTEST ? `<p class="test-build">${equipmentCopy(save.settings.lang).testBuild}</p>${btn('test-currency', equipmentCopy(save.settings.lang).test)}` : ''}` + `<div class="settings-list"><label class="setting-row"><span>${save.settings.lang === 'ko' ? '알림 줄이기' : 'Fewer notifications'}</span><input type="checkbox" data-setting="lessNotices" ${save.settings.lessNotices ? 'checked' : ''}></label><label class="setting-row"><span>${save.settings.lang === 'ko' ? '움직임' : 'Movement'}</span><select data-setting="movement"><option value="weighted" ${save.settings.movement === 'weighted' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '무게감 (기본)' : 'Weighted (default)'}</option><option value="instant" ${save.settings.movement === 'instant' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '즉시' : 'Instant'}</option></select></label><label class="setting-row"><span>${signalCopy(save.settings.lang).setting}</span><select data-setting="telegraphs">${['boss', 'all', 'off'].map((mode, i) => `<option value="${mode}" ${save.settings.telegraphs === mode ? 'selected' : ''}>${signalCopy(save.settings.lang).modes[i]}</option>`).join('')}</select></label><p class="note">${signalCopy(save.settings.lang).hint}</p>${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${combatLabels(save.settings.lang).controls}</p><p>${combatLabels(save.settings.lang).autoHint}</p><p>${esc(tr('pointerHint'))}</p><p>${combatLabels(save.settings.lang).condition}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
+function settingsUI() { const tabs = `<div class="settings-tabs" role="tablist">${['general', 'controls'].map(tab => `<button type="button" role="tab" aria-selected="${settingsTab === tab}" data-act="settings-tab" data-id="${tab}">${save.settings.lang === 'ko' ? (tab === 'controls' ? '조작' : '일반') : (tab === 'controls' ? 'Controls' : 'General')}</button>`).join('')}</div>`; if (settingsTab === 'controls')
+    return heading(tr('settings')) + tabs + controlsUI(save.settings.bindings, save.settings.lang, bindingCapture, bindingMessage); return heading(tr('settings')) + tabs + `${DEV || PLAYTEST ? `<p class="test-build">${equipmentCopy(save.settings.lang).testBuild}</p>${btn('test-currency', equipmentCopy(save.settings.lang).test)}` : ''}` + `<div class="settings-list"><label class="setting-row"><span>${save.settings.lang === 'ko' ? '알림 줄이기' : 'Fewer notifications'}</span><input type="checkbox" data-setting="lessNotices" ${save.settings.lessNotices ? 'checked' : ''}></label><label class="setting-row"><span>${save.settings.lang === 'ko' ? '움직임' : 'Movement'}</span><select data-setting="movement"><option value="weighted" ${save.settings.movement === 'weighted' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '무게감 (기본)' : 'Weighted (default)'}</option><option value="instant" ${save.settings.movement === 'instant' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '즉시' : 'Instant'}</option></select></label><label class="setting-row"><span>${signalCopy(save.settings.lang).setting}</span><select data-setting="telegraphs">${['boss', 'all', 'off'].map((mode, i) => `<option value="${mode}" ${save.settings.telegraphs === mode ? 'selected' : ''}>${signalCopy(save.settings.lang).modes[i]}</option>`).join('')}</select></label><p class="note">${signalCopy(save.settings.lang).hint}</p>${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${combatLabels(save.settings.lang).controls}</p><p>${combatLabels(save.settings.lang).autoHint}</p><p>${esc(tr('pointerHint'))}</p><p>${combatLabels(save.settings.lang).condition}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
 function rewardUI() { return metaRewardUI(save); }
 function resultUI() { const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${sim.chapter?.[save.settings.lang] ?? d.sectorNames[sim.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship"><canvas data-crew="${save.crew}" width="96" height="96"></canvas></div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${save.lastMetaLoot?.dust ?? r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && !r.special && r.sector < 7 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}${rewardUI()}<div class="button-row">${btn('shop', metaCopy(save.settings.lang).rooms)}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'primary', 'data-autofocus')}${btn('copy-record', tr('copyRecord'))}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
 function animateResults(now) { if (view !== 'result')
@@ -210,7 +220,7 @@ function aimDust() { if (view !== 'result')
     el.style.setProperty('--fly-x', `${Math.round(wallet.left + wallet.width / 2 - reward.left - reward.width * .48)}px`);
     el.style.setProperty('--fly-y', `${Math.round(wallet.top + wallet.height / 2 - reward.top - 25)}px`);
 } }
-function soundUI() { return heading(tr('soundRoom')) + `<p>${tr('soundHint')}</p><div class="sound-tracks">${TRACKS.map((track, i) => `<div><b>${dict().trackNames[i]}</b>${[1, 2, 3].map(level => btn('sound-track', tr('intensity') + ' ' + level, 'small', `data-id="${track.id}:${level}"`)).join('')}</div>`).join('')}</div><div class="sound-effects">${SFX_IDS.map((id, i) => btn('sound-fx', dict().soundNames[i], 'small', `data-id="${id}"`)).join('')}</div><div class="button-row">${btn('sound-stop', tr('stopSound'))}${btn('settings', tr('settings'))}</div>`; }
+function soundUI() { return heading(tr('soundRoom')) + `<p>${tr('soundHint')}</p><div class="sound-tracks">${TRACKS.map((track, i) => `<div><b>${dict().trackNames[i] ?? track.id.toUpperCase()}</b>${[1, 2, 3].map(level => btn('sound-track', tr('intensity') + ' ' + level, 'small', `data-id="${track.id}:${level}"`)).join('')}</div>`).join('')}</div><div class="sound-effects">${SFX_IDS.map((id, i) => btn('sound-fx', dict().soundNames[i], 'small', `data-id="${id}"`)).join('')}</div><div class="button-row">${btn('sound-stop', tr('stopSound'))}${btn('settings', tr('settings'))}</div>`; }
 function drawUI() {
     document.documentElement.classList.toggle('in-combat', view === 'playing');
     document.documentElement.classList.toggle('in-practice', view === 'practice');
@@ -314,7 +324,10 @@ function choose(index) { if (view !== 'choice' || !offers[index] || !sim)
     }
     return;
 } lastFusion = FUSIONS.findIndex(f => f.id === offers[index].id); const evolved = offers[index].kind === 'evolve' || offers[index].kind === 'skillEvolve' || offers[index].kind === 'fusion'; lastSkill = offers[index].kind === 'skillEvolve' ? offers[index].id : offers[index].kind === 'fusion' ? FUSIONS.find(f => f.id === offers[index].id).b : null; const chosenId = offers[index].kind === 'fusion' ? FUSIONS.find(f => f.id === offers[index].id).a : offers[index].id; if (!sim.apply(offers[index], chest))
-    return; audio.skipCue(); audio.ui(); if (evolved) {
+    return; audio.skipCue(); if (offers[index].kind === 'heal')
+    audio.play('heal');
+else
+    audio.ui(); if (evolved) {
     lastEvolved = chosenId;
     audio.consume(sim.events);
     sim.events.length = 0;
@@ -458,6 +471,8 @@ function action(act, id = '') {
         return;
     }
     if (act === 'skip-cue') {
+        if (sim)
+            skipBossIntro(sim);
         audio.skipCue();
         resultAt = performance.now() - 5000;
         app.classList.add('cue-skipped');
@@ -493,6 +508,42 @@ function action(act, id = '') {
         if (!difficultyOpen(save, String(n), difficulty))
             difficulty = 'normal';
         drawUI();
+        return;
+    }
+    if (act === 'settings-tab') {
+        settingsTab = id === 'controls' ? 'controls' : 'general';
+        bindingCapture = null;
+        bindingMessage = '';
+        drawUI();
+        return;
+    }
+    if (act === 'bind-control') {
+        const [a, d] = id.split(':');
+        if (ACTIONS.includes(a) && ['keyboard', 'mouse', 'pad'].includes(d)) {
+            bindingCapture = { action: a, device: d };
+            bindingMessage = '';
+            drawUI();
+        }
+        return;
+    }
+    if (act === 'cancel-control') {
+        bindingCapture = null;
+        bindingMessage = '';
+        drawUI();
+        return;
+    }
+    if (act === 'reset-controls') {
+        save.settings.bindings = defaultBindings();
+        bindingCapture = null;
+        bindingMessage = save.settings.lang === 'ko' ? '기본값으로 되돌렸습니다.' : 'Defaults restored.';
+        persist();
+        drawUI();
+        return;
+    }
+    if (act === 'skip-boss') {
+        if (sim)
+            skipBossIntro(sim);
+        audio.skipCue();
         return;
     }
     if (act === 'settings') {
@@ -586,10 +637,22 @@ function updateHUD() {
     }
     const next = sim.encounters[sim.encounterIndex], remaining = (next?.at ?? Infinity) - sim.time, last = sim.bossRecords.at(-1);
     const bossLabel = (art, final) => sim.expedition && localBossName(sim.chapter.id, art, final) || d.bossNames[art];
-    if (remaining <= 2.5 && remaining > 0)
+    if (!sim.expedition && remaining <= 2.5 && remaining > 0)
         announce('warning:' + sim.encounterIndex, (save.settings.lang === 'ko' ? '접근 감지 · ' : 'Approaching · ') + bossLabel(next.art < 0 ? sim.sector : next.art, next.role === 'final'), 2);
-    if (last && sim.time - last.spawned >= (sim.expedition ? 1.1 : 0) && sim.time - last.spawned < (sim.expedition ? 2.6 : 1.5))
+    if (!sim.expedition && last && sim.time - last.spawned >= (sim.expedition ? 1.1 : 0) && sim.time - last.spawned < (sim.expedition ? 2.6 : 1.5))
         announce('boss:' + last.id, (last.role === 'final' ? (save.settings.lang === 'ko' ? '최종 보스 · ' : 'Final boss · ') : '') + bossLabel(last.art, last.role === 'final'), 3);
+    const approach = incomingBoss(sim), alert = document.getElementById('boss-alert');
+    alert.hidden = !approach;
+    document.getElementById('hud')?.classList.toggle('boss-approaching', !!approach && approach.role === 'final');
+    alert.classList.toggle('final', approach?.role === 'final');
+    if (approach)
+        alert.textContent = `⚠ ${save.settings.lang === 'ko' ? '보스 접근' : 'BOSS INCOMING'} — ${bossLabel(approach.art, approach.role === 'final')} ${approach.direction} ${approach.remaining.toFixed(1)}`;
+    const introduction = boss && bossState(boss), card = document.getElementById('boss-intro');
+    card.hidden = !introduction || introduction.intro >= .8;
+    if (!card.hidden) {
+        card.querySelector('b').textContent = bossLabel(boss.bossArt, boss.role === 'final');
+        card.querySelector('button').textContent = save.settings.lang === 'ko' ? '건너뛰기' : 'Skip';
+    }
     const message = combatNotice.current(performance.now()), incoming = document.getElementById('incoming');
     incoming.hidden = !message;
     if (message && incoming.dataset.notice !== String(combatNotice.started)) {
@@ -616,7 +679,11 @@ function updateHUD() {
     document.getElementById('danger-label').hidden = save.settings.telegraphs === 'off' || !sim.hazards.some(h => h.age < h.warning && (h.boss || save.settings.telegraphs === 'all')) && !boss?.warnTime;
     set('objective-label', sim.beacon ? '◈' : sim.drops.length ? '▣' : '');
     document.getElementById('objective-label').title = sim.beacon ? tr('beaconDesc') : sim.drops.length ? tr('findChest') : '';
-    updateCombatControls(sim, save.settings.lang);
+    if (document.querySelectorAll('[data-combat-skill]').length !== sim.skillCapacity) {
+        document.querySelector('.combat-controls')?.remove();
+        document.getElementById('hud')?.insertAdjacentHTML('beforeend', combatControls(save.settings.lang, sim.autoCast, sim.skillCapacity, save.settings.bindings));
+    }
+    updateCombatControls(sim, save.settings.lang, save.settings.bindings);
     const chips = document.getElementById('upgrade-chips'), markup = `<div class="slot-label">${tr('weapon')} ${sim.weapons.length}/3</div><div class="slot-row">${Array.from({ length: 3 }, (_, i) => { const w = sim.weapons[i], wi = w ? WEAPONS.findIndex(d => d.id === w.id) : -1; return `<span class="slot ${w?.evolved ? 'evolved' : ''}" ${w ? `title="${esc(w.fusion ? combatCopy(save.settings.lang).fusionNames[FUSIONS.findIndex(f => f.id === w.fusion)] : w.evolved ? d.evolutionNames[wi] : d.weaponNames[wi])}"` : ''}>${w ? icon(w.id, w.evolved) + `<small>${w.evolved ? '&#9733;' : w.level >= 5 ? d.max : w.level}</small>` : ''}</span>`; }).join('')}</div><div class="slot-label">${tr('passive')} ${Object.keys(sim.passives).length}/4</div><div class="slot-row">${Array.from({ length: 4 }, (_, i) => { const id = Object.keys(sim.passives)[i]; return `<span class="slot">${id ? icon(id) + `<small>${sim.passives[id] >= 6 ? d.max : sim.passives[id]}</small>` : ''}</span>`; }).join('')}</div>${Object.values(sim.boosts).some(n => n > 0) ? `<div class="extra-boosts">${d.stacked}: ${d.boostDescriptions.map((label, i) => label.replace(/\d+/, String([sim.boosts.damage * 3, sim.boosts.hull * 5, sim.boosts.reach * 5][i]))).join(' / ')}</div>` : ''}`;
     if (chips.innerHTML !== markup)
         chips.innerHTML = markup;
@@ -626,15 +693,10 @@ function updateHUD() {
 }
 function resize() { V.w = window.innerWidth; V.h = window.innerHeight; V.dpr = Math.min(window.devicePixelRatio || 1, 1.5); V.scale = fieldScale(V.w, V.h); cosmos.resize(V.w, V.h, V.dpr, 'auto'); }
 function inputState() {
-    let x = Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft')), y = Number(keys.has('KeyS') || keys.has('ArrowDown')) - Number(keys.has('KeyW') || keys.has('ArrowUp'));
-    x += joy.x;
-    y += joy.y;
-    const pad = Array.from(navigator.getGamepads?.() ?? []).find(p => p?.connected);
+    const pad = Array.from(navigator.getGamepads?.() ?? []).find(p => p?.connected), amount = (a) => controlAmount(save.settings.bindings, a, keys, mouseButtons, pad);
+    let x = amount('right') - amount('left') + joy.x, y = amount('down') - amount('up') + joy.y;
     let ax = 0, ay = 0, manual = pointer.aim;
     if (pad?.connected) {
-        const v = deadzone(pad.axes[0] ?? 0, pad.axes[1] ?? 0);
-        x += v.x;
-        y += v.y;
         const aim = deadzone(pad.axes[2] ?? 0, pad.axes[3] ?? 0);
         if (aim.x || aim.y) {
             ax = aim.x;
@@ -653,10 +715,10 @@ function inputState() {
             ay = dy;
         }
     }
-    const dash = dashPressed || keys.has('Space') || keys.has('ShiftLeft') || keys.has('ShiftRight') || !!pad?.buttons[1]?.pressed, skill1 = skillPressed[0] || keys.has('KeyQ') || !!pad?.buttons[4]?.pressed, skill2 = skillPressed[1] || keys.has('KeyE') || !!pad?.buttons[5]?.pressed;
+    const dash = dashPressed || amount('dash') > 0, skills = Array.from({ length: 6 }, (_, i) => skillPressed[i] || amount(`skill${i + 1}`) > 0);
     dashPressed = false;
-    skillPressed = [false, false];
-    return { x, y, aimX: ax, aimY: ay, dash, manual, skill1, skill2 };
+    skillPressed = Array(6).fill(false);
+    return { x, y, aimX: ax, aimY: ay, dash, manual, skills };
 }
 function pollPad(now) {
     const pad = Array.from(navigator.getGamepads?.() ?? []).find(p => p?.connected);
@@ -665,11 +727,22 @@ function pollPad(now) {
             setView('pause');
         hadPad = false;
         padBefore = [];
+        padPauseBefore = false;
         return;
     }
     hadPad = true;
     const pressed = pad.buttons.map(b => b.pressed), edge = (i) => pressed[i] && !padBefore[i];
-    if (edge(9)) {
+    if (bindingCapture?.device === 'pad') {
+        const button = pressed.findIndex((_, i) => edge(i)), axis = pad.axes.findIndex(v => Math.abs(v) > .7);
+        if (button >= 0)
+            captureControl(`Pad${button}`);
+        else if (axis >= 0)
+            captureControl(`PadAxis${axis}${pad.axes[axis] < 0 ? '-' : '+'}`);
+        padBefore = pressed;
+        return;
+    }
+    const padPause = controlAmount(save.settings.bindings, 'pause', new Set(), new Set(), pad) > 0;
+    if (padPause && !padPauseBefore) {
         if (view === 'playing')
             setView('pause');
         else if (view === 'pause')
@@ -714,10 +787,11 @@ function pollPad(now) {
             action('reroll');
     }
     padBefore = pressed;
+    padPauseBefore = padPause;
 }
 function advance(dt) { if (!sim || view !== 'playing' || stressPreview)
     return; sim.viewWidth = V.w / V.scale; sim.viewHeight = V.h / V.scale; const dashBefore = sim.player.dashTime; sim.step(dt, inputState()); if (sim.player.dashTime > dashBefore)
-    audio.play('dash'); cosmos.consumeEvents(sim.events); audio.consume(sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }, sim.skillUses); audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id); if (sim.events.some(e => e.kind === 'boss')) {
+    audio.play('dash'); cosmos.consumeEvents(sim.events); audio.consume(sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }, sim.skillUses); audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id, sim.player, sim.enemies.find(e => e.type === 'boss' && e.hp > 0)?.bossArt); if (sim.events.some(e => e.kind === 'boss')) {
     document.getElementById('cue-skip')?.remove();
     app.insertAdjacentHTML('beforeend', btn('skip-cue', tr('skipCue'), 'cue-skip', 'id="cue-skip"'));
 } sim.events.length = 0; if (sim.status !== 'playing') {
@@ -815,6 +889,8 @@ app.addEventListener('click', e => { const b = e.target.closest('[data-act]'); i
         audio.ui();
     action(b.dataset.act, b.dataset.id);
 } });
+app.addEventListener('click', event => { const button = event.target.closest('[data-combat-skill]'); if (button && event.detail === 0 && ['playing', 'practice'].includes(view))
+    skillPressed[Number(button.dataset.combatSkill)] = true; });
 app.addEventListener('pointerover', e => { const b = e.target.closest('button'); if (b && !b.contains(e.relatedTarget))
     audio.ui(b.disabled ? 'locked' : 'hover'); });
 app.addEventListener('focusin', e => { if (e.target.matches('button'))
@@ -905,7 +981,42 @@ else if (k === 'reduced' || k === 'numbers' || k === 'lessNotices') {
     save.settings[k] = el.checked;
     persist();
 } });
+function captureControl(token) { if (!bindingCapture)
+    return; const result = bindControl(save.settings.bindings, bindingCapture.action, bindingCapture.device, token); if (result.ok) {
+    save.settings.bindings = result.bindings;
+    bindingCapture = null;
+    bindingMessage = save.settings.lang === 'ko' ? '저장했습니다.' : 'Saved.';
+    persist();
+}
+else
+    bindingMessage = result.conflict ? (save.settings.lang === 'ko' ? `${bindingLabel(token)}: ${controlLabel(result.conflict, save.settings.lang)}와 겹칩니다.` : `${bindingLabel(token)} is assigned to ${controlLabel(result.conflict, save.settings.lang)}.`) : (save.settings.lang === 'ko' ? '이 입력은 사용할 수 없습니다.' : 'This input is unavailable.'); drawUI(); }
 window.addEventListener('keydown', e => {
+    if (view === 'playing' && e.code === 'Enter' && sim?.enemies.some(enemy => (bossState(enemy)?.intro ?? 1) < .8)) {
+        e.preventDefault();
+        skipBossIntro(sim);
+        return;
+    }
+    if (view === 'settings' && bindingCapture) {
+        e.preventDefault();
+        if (e.code === 'Escape') {
+            bindingCapture = null;
+            bindingMessage = '';
+            drawUI();
+        }
+        else if (bindingCapture.device === 'keyboard')
+            captureControl(e.code);
+        return;
+    }
+    if (['playing', 'practice', 'pause'].includes(view) && save.settings.bindings.pause.includes(e.code)) {
+        e.preventDefault();
+        if (!e.repeat) {
+            if (view === 'playing')
+                action('pause');
+            else if (view === 'pause')
+                action('resume');
+        }
+        return;
+    }
     if (DEV && view === 'soundboard') {
         if (e.code === 'Escape') {
             audio.stop();
@@ -973,19 +1084,15 @@ window.addEventListener('keydown', e => {
         action('skip-chest');
         return;
     }
-    if (e.code === 'F3') {
+    if (e.code === 'F3' && !ACTIONS.some(a => save.settings.bindings[a].includes(e.code))) {
         e.preventDefault();
         showPerf = !showPerf;
         visualPreference('fps', showPerf ? '1' : '0');
         return;
     }
-    if (e.code === 'Escape' || e.code === 'KeyP') {
+    if (e.code === 'Escape' && !['playing', 'practice', 'pause'].includes(view)) {
         e.preventDefault();
-        if (view === 'playing')
-            action('pause');
-        else if (view === 'pause')
-            action('resume');
-        else if (view === 'settings' || view === 'shop')
+        if (view === 'settings' || view === 'shop')
             action('back');
         return;
     }
@@ -997,7 +1104,7 @@ window.addEventListener('keydown', e => {
         action('reroll');
         return;
     }
-    if (['playing', 'practice', 'title'].includes(view) && ['Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code))
+    if (['playing', 'practice', 'title'].includes(view) && ACTIONS.some(a => save.settings.bindings[a].includes(e.code)))
         e.preventDefault();
     keys.add(e.code);
     if (!['playing', 'practice', 'title'].includes(view) && e.code === 'Tab') {
@@ -1035,7 +1142,7 @@ canvas.addEventListener('pointerdown', e => { if (!['playing', 'practice'].inclu
     if (e.clientX < V.w * .5 && e.clientY > V.h * .5 && !Array.from(document.querySelectorAll('#upgrade-chips,.status-box,.hud-actions,.minimap-wrap,#bossbar')).some(el => { const r = el.getBoundingClientRect(); return r.width > 0 && e.clientX > r.left - 44 && e.clientX < r.right + 44 && e.clientY > r.top - 44 && e.clientY < r.bottom + 44; }))
         beginJoystick(e);
     return;
-} pointer.down = e.button === 2; pointer.aim = e.button === 0; pointer.x = e.clientX; pointer.y = e.clientY; canvas.setPointerCapture?.(e.pointerId); });
+} pointer.down = e.button === 2 && !ACTIONS.some(a => save.settings.bindings[a].includes('Mouse2')); pointer.aim = e.button === 0; pointer.x = e.clientX; pointer.y = e.clientY; canvas.setPointerCapture?.(e.pointerId); });
 window.addEventListener('pointermove', e => { pointer.x = e.clientX; pointer.y = e.clientY; if (e.pointerId === joy.id)
     moveJoystick(e); });
 function moveJoystick(e) { const el = document.getElementById('joystick'); if (!el)
@@ -1066,6 +1173,20 @@ function pointerUp(e) { pointer.down = pointer.aim = false; if (e.pointerId === 
     if (stick)
         stick.style.transform = 'translate(0,0)';
 } }
+window.addEventListener('pointerdown', e => { if (bindingCapture?.device === 'mouse') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    captureControl(`Mouse${e.button}`);
+    return;
+} if (!['playing', 'practice', 'pause'].includes(view) || e.pointerType === 'touch')
+    return; mouseButtons.add(e.button); if (save.settings.bindings.pause.includes(`Mouse${e.button}`)) {
+    if (view === 'pause')
+        action('resume');
+    else if (view === 'playing')
+        action('pause');
+} }, true);
+window.addEventListener('pointerup', e => mouseButtons.delete(e.button));
+window.addEventListener('pointercancel', () => mouseButtons.clear());
 window.addEventListener('pointerup', pointerUp);
 window.addEventListener('pointercancel', pointerUp);
 for (const image of [...new Set(SECTORS.map(s => s.image).concat(['horsehead.jpg', 'elliptical.jpg', 'irregular.jpg']))]) {

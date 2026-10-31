@@ -1,4 +1,7 @@
 import { SKILLS, skillDef } from './combat-catalog.js';
+import { EffectRenderer } from './vfx-art.js';
+import { effect } from './effect-grammar.js';
+const fieldEffects = new EffectRenderer();
 const masks = [
     ['.......xx...', '.....xxxx...', '...xxxx.....', '.xxxx.......', 'xxxx....x...', '.xxxx...xx..', '...xxxx.xxx.', '.....xxxxxxx', '.......xxxx.'],
     ['...xxxxxx...', '..xxxxxxxx..', '..xxxxxxxx..', '...xxxxxx...', '.....xx.....', '.....xx.....', '....xxxx....', '..xxxxxxxx..', 'xxxxxxxxxxxx'],
@@ -16,7 +19,7 @@ export function skillSprite(id) {
         return old;
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 24;
-    const c = canvas.getContext('2d'), rows = masks[SKILLS.findIndex(s => s.id === id)], color = skillDef(id).color;
+    const c = canvas.getContext('2d'), def = skillDef(id), index = SKILLS.findIndex(s => s.id === id), rows = masks[index] ?? masks[{ attack: 5, movement: 3, defense: 7, control: 4, summon: 2, buff: 6 }[def.category]], color = def.color;
     for (let y = 0; y < rows.length; y++)
         for (let x = 0; x < rows[y].length; x++)
             if (rows[y][x] !== ' ' && rows[y][x] !== '.') {
@@ -29,6 +32,12 @@ export function skillSprite(id) {
                 c.fillStyle = (x + y) % 4 === 0 ? '#e8f1e9' : color;
                 c.fillRect(x + 6, y + 6, 1, 1);
             }
+    if (index >= 8) {
+        c.fillStyle = color;
+        for (let i = 0; i < 4; i++)
+            if ((index - 7) & 1 << i)
+                c.fillRect(4 + i * 4, 20, 3, 2);
+    }
     cache.set(id, canvas);
     return canvas;
 }
@@ -46,8 +55,7 @@ export function drawCombatIcons(root) {
 }
 export function drawSkillFields(c, s, view) {
     for (const field of s.combatFields ?? []) {
-        const x = view.X(field.x), y = view.Y(field.y), r = field.radius * view.unit, def = skillDef(field.id);
-        c.fillStyle = def.color;
+        const x = view.X(field.x), y = view.Y(field.y), r = field.radius * view.unit, t = view.reduced ? .3 : view.time;
         if (field.id === 'drone') {
             const phase = view.reduced ? 0 : view.time * 3;
             for (let j = 0; j < field.count; j++) {
@@ -55,30 +63,24 @@ export function drawSkillFields(c, s, view) {
                 c.drawImage(skillSprite('drone'), Math.round(x + Math.cos(a) * 25) - 12, Math.round(y + Math.sin(a) * 15) - 25);
             }
         }
-        else if (field.id === 'reflect') {
-            for (let j = 0; j < 16; j++) {
-                const a = j * Math.PI / 8 + (view.reduced ? 0 : view.time * .8), xx = Math.round(x + Math.cos(a) * r), yy = Math.round(y + Math.sin(a) * r * .65);
-                c.fillRect(xx - 3, yy - 3, 6, 6);
-                c.fillStyle = '#e8f1e9';
-                c.fillRect(xx - 1, yy - 1, 2, 2);
-                c.fillStyle = def.color;
-            }
-        }
+        else if (field.id === 'reflect')
+            fieldEffects.effect(c, effect('electric', 'ring', Math.max(16, Math.min(240, r * 2)), 1), x, y, t, true);
         else if (field.id === 'stasis') {
-            c.globalAlpha = .5;
-            for (let i = -2; i <= 2; i++)
-                for (let j = -2; j <= 2; j++)
-                    if (i * i + j * j < 8) {
-                        c.fillRect(Math.round(x + i * r / 3), Math.round(y + j * r / 3), 2, 7);
-                        c.fillRect(Math.round(x + i * r / 3), Math.round(y + j * r / 3), 6, 2);
-                    }
-            c.globalAlpha = 1;
-            c.drawImage(skillSprite('stasis'), Math.round(x) - 12, Math.round(y) - 12);
+            const alpha = c.globalAlpha;
+            c.globalAlpha = alpha * .4;
+            c.fillStyle = '#91a6b2';
+            for (let yy = -r; yy <= r; yy += 4)
+                for (let xx = -r; xx <= r; xx += 4)
+                    if (xx * xx + yy * yy < r * r)
+                        c.fillRect(Math.round(x + xx), Math.round(y + yy), 1, 1);
+            c.globalAlpha = alpha;
+            fieldEffects.effect(c, effect('time', 'ring', Math.max(16, Math.min(240, r * 2)), 1), x, y, t, true);
+            fieldEffects.effect(c, effect('time', 'field', 48, 1), x, y, 0, true);
         }
         else if (field.id === 'bombard') {
             for (let j = 0; j < 6; j++) {
                 const a = j * Math.PI / 3;
-                c.fillRect(Math.round(x + Math.cos(a) * r * .7) - 2, Math.round(y + Math.sin(a) * r * .7) - 2, 4, 4);
+                fieldEffects.effect(c, effect('fire', 'summon', 24, 1), x + Math.cos(a) * r * .7, y + Math.sin(a) * r * .7, t + j * .1, true);
             }
         }
     }

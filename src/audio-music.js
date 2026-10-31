@@ -1,9 +1,10 @@
+import { isBossTrack } from './audio-feel.js';
 export const CROSSFADE_SECONDS = 1.5;
 export function musicOption(search = globalThis.location?.search ?? '') {
     const value = new URLSearchParams(search).get('music');
     return value === 'b' || value === 'c' ? value : 'a';
 }
-export const musicRole = (track) => track === 'boss' ? 'boss' : track === 'title' || track === 'refuge' ? 'hub' : 'combat';
+export const musicRole = (track) => isBossTrack(track) ? 'boss' : track === 'title' || track === 'refuge' ? 'hub' : 'combat';
 export class MusicStream {
     decks = [];
     current = -1;

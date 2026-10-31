@@ -1,7 +1,7 @@
 import { effectFeedback } from './vfx-feedback.js';
-import { AUTO_LIMIT, PASSIVE_LIMIT, SKILL_LIMIT, CREW_SKILL, SKILLS, skillSlot } from './combat-catalog.js';
+import { AUTO_LIMIT, PASSIVE_LIMIT, SKILL_LIMIT, INITIAL_SKILL_SLOTS, CREW_SKILL, SKILLS, skillSlot } from './combat-catalog.js';
 import { updateSkills, castMovement, startDash } from './combat-active.js';
-import { CHAPTER_RATE, CHAPTER_SECONDS, bossSchedule, swarmSchedule, arrivalFor } from './encounters.js';
+import { CHAPTER_RATE, CHAPTER_SECONDS, bossSchedule, swarmSchedule, arrivalFor, bossLeadTime, incomingBoss } from './encounters.js';
 import { hordeTarget } from './horde.js';
 import { setupBoss, updateBoss, updateElite, updateBossWorld, arenaPoint, arenaSpawnAllowed, constrainArena, bounceArena, steerBossBullet, resetBossBullet, finishBoss } from './boss-director.js';
 import { chapterDef, LOCAL_ENEMIES, LOCAL_PATTERNS } from './chapters.js';
@@ -21,6 +21,8 @@ export const inGap = (gaps, width, a) => gaps.some(g => Math.abs(Math.atan2(Math
 export function segmentDistance(px, py, ax, ay, bx, by) { const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy, t = l ? clamp(((px - ax) * dx + (py - ay) * dy) / l, 0, 1) : 0; return Math.hypot(px - ax - dx * t, py - ay - dy * t); }
 function squaredSegmentDistance(px, py, ax, ay, bx, by) { const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy, t = l ? clamp(((px - ax) * dx + (py - ay) * dy) / l, 0, 1) : 0, qx = px - ax - dx * t, qy = py - ay - dy * t; return qx * qx + qy * qy; }
 export class Simulation {
+    skillCapacity = INITIAL_SKILL_SLOTS;
+    combatBuffs = { power: 0, powerGain: 0, speed: 0, speedGain: 0, shield: 0, shieldTime: 0 };
     skills = [];
     autoCast = true;
     combatFields = [];
@@ -59,6 +61,7 @@ export class Simulation {
     get encounters() { return bossSchedule(this.expedition); }
     get duration() { return this.expedition ? CHAPTER_SECONDS : 600; }
     get progress() { return this.bossKilled ? 1 : Math.min(.99, this.time / this.duration); }
+    incomingAt = -1;
     bossWarning = -1;
     bossDefeatedAt = -1;
     arrivalSites = [];
@@ -395,11 +398,13 @@ export class Simulation {
             s.knockback = (s.knockback + 4) * 1.3;
     } s.damage += this.boosts.damage * .03 + b.attack + this.chaos.damage; s.maxHp += this.boosts.hull * 5 + b.hp; s.armor += b.armor + (t.armor ?? 0) * 2; s.magnet += this.boosts.reach * 5 + (t.magnet ?? 0) * 45; s.regen += (t.regen ?? 0) * .6; s.xp += (t.xp ?? 0) * .15; s.area += (t.area ?? 0) * .15; s.cooldown *= Math.max(.65, 1 - (t.cooldown ?? 0) * .08); if (t.chaosGloves)
         s.crit += .12; s.maxHp *= this.chaos.hp; s.cooldown *= this.chaos.haste; if (t.lowSpeed && this.player.hp < this.player.maxHp * .3)
-        s.speed *= 1.2; return s; }
+        s.speed *= 1.2; if (this.combatBuffs.power > 0)
+        s.damage *= 1 + this.combatBuffs.powerGain; if (this.combatBuffs.speed > 0)
+        s.speed *= 1 + this.combatBuffs.speedGain; return s; }
     get mode() { return MODES[this.difficulty]; }
-    emit(kind, x = this.player.x, y = this.player.y, value = 0, color = '#ffd260', weapon, size) { if (kind === 'shoot') {
+    emit(kind, x = this.player.x, y = this.player.y, value = 0, color = '#ffd260', weapon, size, audio) { if (kind === 'shoot') {
         this.muzzleTime = .09;
-    } const event = { kind, x, y, value, color, weapon, size }; effectFeedback(this, event); if (this.events.length < 120)
+    } const event = { kind, x, y, value, color, weapon, size, ...audio }; effectFeedback(this, event); if (this.events.length < 120)
         this.events.push(event);
     else if (['hurt', 'warning', 'level', 'boss', 'evolve', 'chest', 'reaction', 'bossWarning'].includes(kind)) {
         const i = this.events.findIndex(e => ['hit', 'shoot', 'kill', 'pickup'].includes(e.kind));
@@ -481,7 +486,7 @@ export class Simulation {
             }
         }
         if (e.type === 'boss' && e.phase < e.stages - 1) {
-            const boundary = e.maxHp * (e.stages - e.phase - 1) / e.stages;
+            const boundary = this.expedition ? e.maxHp * (e.phase === 0 ? .5 : .25) : e.maxHp * (e.stages - e.phase - 1) / e.stages;
             if (e.hp <= boundary) {
                 e.hp = boundary;
                 e.phase++;
@@ -542,7 +547,11 @@ export class Simulation {
         p.invul = 1;
         this.effect('evolve', p.x, p.y, 100, '#f6c454', .45);
         return true;
-    } this.lastDamageCause = cause; const damage = Math.max(1, raw * (this.chapter?.damage ?? 1) * this.chaos.incoming - this.attributes.armor); p.hp = Math.max(0, p.hp - damage); p.invul = this.mode.iframes; p.flash = .18; this.shake = 6; this.hitStop = .045; this.emit('hurt', p.x, p.y, Math.ceil(damage), '#ff746e'); this.damageNumber(p.x, p.y - 30, -Math.ceil(damage), '#ffaca4'); if (this.passives.thorns)
+    } this.lastDamageCause = cause; let damage = Math.max(1, raw * (this.chapter?.damage ?? 1) * this.chaos.incoming - this.attributes.armor); const absorbed = Math.min(damage, this.combatBuffs.shield); this.combatBuffs.shield -= absorbed; damage -= absorbed; if (damage === 0) {
+        p.invul = .1;
+        this.effect('ring', p.x, p.y, 65, '#87cf78', .15);
+        return true;
+    } p.hp = Math.max(0, p.hp - damage); p.invul = this.mode.iframes; p.flash = .18; this.shake = 6; this.hitStop = .045; this.emit('hurt', p.x, p.y, Math.ceil(damage), '#ff746e'); this.damageNumber(p.x, p.y - 30, -Math.ceil(damage), '#ffaca4'); if (this.passives.thorns)
         impact(this, p.x, p.y, 130, 18 * this.passives.thorns, 'nova', 30); if (t.chaosSuit && this.time >= this.chaosSuitAt) {
         this.chaosSuitAt = this.time + 6;
         this.areaDamage(p.x, p.y, 200, 40, 20, 'frost');
@@ -579,7 +588,7 @@ export class Simulation {
     offers(chest = false, previous = []) {
         if (chest && this.chestRank === 5)
             return [{ kind: 'chaos', id: String(this.chestQueue[0]?.chaos ?? 0) }];
-        let offers = choices(this.weapons, this.passives, this.time, chest, this.random, previous, this.banished, this.skills);
+        let offers = choices(this.weapons, this.passives, this.time, chest, this.random, previous, this.banished, this.skills, this.skillCapacity);
         if (chest && this.chestRank === 3) {
             const evolved = offers.filter(c => c.kind === 'evolve' || c.kind === 'skillEvolve' || c.kind === 'fusion');
             if (evolved.length)
@@ -619,10 +628,15 @@ export class Simulation {
                     return false;
                 slot.level++;
             }
-            else if (this.skills.length < SKILL_LIMIT)
+            else if (this.skills.length < this.skillCapacity)
                 this.skills.push(skillSlot(def.id));
             else
                 return false;
+        }
+        else if (choice.kind === 'skillSlot') {
+            if (choice.id !== 'open' || this.skillCapacity >= SKILL_LIMIT || this.skillLevels >= RUN_SKILL_LIMIT)
+                return false;
+            this.skillCapacity++;
         }
         else if (choice.kind === 'skillEvolve') {
             const slot = this.skills.find(s => s.id === choice.id);
@@ -1300,7 +1314,7 @@ export class Simulation {
                 this.xpCredit -= xp;
             if (xp > 0)
                 this.dropXP(e.x, e.y, xp);
-            this.emit('kill', e.x, e.y, e.type === 'boss' ? 2 : 0, '#ffd260', undefined, e.r);
+            this.emit('kill', e.x, e.y, e.type === 'boss' ? 2 : 0, '#ffd260', undefined, e.r, { elite: e.elite });
             if (this.random() < .025 * (e.crowd ? .01 : 1))
                 this.dropXP(e.x + 12, e.y, 10, 'heal');
             this.burst(e.x, e.y, e.type === 'boss' ? '#f6c454' : '#df5c53', e.type === 'boss' ? 24 : 4, 1);
@@ -1419,15 +1433,17 @@ export class Simulation {
                 this.spawnBudget--;
             }
             const encounter = this.encounters[this.encounterIndex];
-            if (encounter && this.time >= encounter.at - 2.5 && this.bossWarning !== this.encounterIndex) {
+            if (encounter && this.time >= encounter.at - bossLeadTime(encounter.role) && this.bossWarning !== this.encounterIndex && arenaSpawnAllowed(this, 'rusher')) {
                 this.bossWarning = this.encounterIndex;
-                this.emit('bossWarning', p.x, p.y, encounter.role === 'final' ? 1 : 0);
+                this.incomingAt = this.time;
+                const point = incomingBoss(this);
+                this.emit('bossWarning', point.x, point.y, encounter.role === 'final' ? 1 : 0);
             }
-            if (encounter && this.time >= encounter.at && arenaSpawnAllowed(this, 'rusher')) {
+            if (encounter && this.time >= encounter.at && this.bossWarning === this.encounterIndex && this.time >= this.incomingAt + bossLeadTime(encounter.role) - 1e-6 && arenaSpawnAllowed(this, 'rusher')) {
                 const e = this.spawn('boss', p.x + 220, p.y - 120, encounter.role);
                 if (e) {
                     e.bossArt = encounter.art < 0 ? this.sector : encounter.art;
-                    e.stages = encounter.stages;
+                    e.stages = this.expedition ? 3 : encounter.stages;
                     e.hp = e.maxHp = encounter.hp * this.mode.hp * (1 + this.sector * .12) * (this.chapter?.bossHp ?? 1) * (this.expedition ? CHAPTER_RATE : 1);
                     e.xp = encounter.role === 'final' ? 900 : encounter.role === 'middle' ? 400 : 180;
                     e.r = encounter.role === 'captain' ? 52 : encounter.role === 'middle' ? 66 : 78;
@@ -1560,7 +1576,7 @@ export class Simulation {
                     p.hp = Math.min(p.maxHp, p.hp + g.value);
                 else
                     this.gainXP(g.value);
-                this.emit('pickup', g.x, g.y, g.value);
+                this.emit('pickup', g.x, g.y, g.value, '#ffd260', undefined, undefined, { heal: g.kind === 'heal' });
                 this.gemPool.remove(i);
             }
         }
