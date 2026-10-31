@@ -1,5 +1,5 @@
 import { ROOMS } from '../base-rooms.js';
-export const hubVariant = (search) => { const value = new URLSearchParams(search).get('hub'); return value === 'a' || value === 'b' || value === 'c' ? value : '0'; };
+export const hubVariant = (search) => { const value = new URLSearchParams(search).get('hub'); return value === '0' || value === 'b' || value === 'c' ? value : 'a'; };
 export const hubNames = { a: { ko: '방주 단면도', en: 'Ark cross-section' }, b: { ko: '회전 고리 복도', en: 'Rotating ring' }, c: { ko: '작은 조종실', en: 'Little bridge' } };
 const station = (id, x, y, kind, ko, en) => ({ id, x, y, kind, ko, en });
 const facilities = (points) => [
@@ -14,11 +14,14 @@ const facilities = (points) => [
 export function makeLayout(variant, portrait = false) {
     let w = 640, h = 288, spawn, crew, rooms, places, walkable;
     if (variant === 'a') {
-        spawn = { x: 320, y: 264 };
-        crew = { pip: { x: 80, y: 104 }, bolt: { x: 80, y: 184 }, mori: { x: 320, y: 184 }, mew: { x: 552, y: 184 } };
-        rooms = ROOMS.map((r, i) => ({ id: r.id, x: 40 + i % 3 * 200, y: i < 3 ? 40 : 120, w: 160, h: 64, entry: { x: 120 + i % 3 * 200, y: i < 3 ? 104 : 184 } }));
-        places = facilities([spawn, { x: 392, y: 264 }, { x: 128, y: 264 }, { x: 520, y: 264 }, { x: 64, y: 264 }, { x: 576, y: 264 }, { x: 552, y: 104 }]);
-        walkable = (x, y) => x >= 32 && x <= 608 && y >= 96 && y <= 272 && ([104, 184, 264].some(f => Math.abs(y - f) <= 8) || [216, 424].some(l => Math.abs(x - l) <= 8));
+        w = 752;
+        h = 376;
+        spawn = { x: 368, y: 352 };
+        crew = { pip: { x: 104, y: 128 }, bolt: { x: 88, y: 240 }, mori: { x: 360, y: 240 }, mew: { x: 648, y: 240 } };
+        const bounds = [[36, 42, 180, 86], [268, 56, 204, 72], [532, 32, 184, 96], [36, 162, 180, 78], [268, 146, 204, 94], [532, 158, 184, 82]];
+        rooms = ROOMS.map((r, i) => { const [x, y, w, h] = bounds[i]; return { id: r.id, x, y, w, h, entry: { x: x + w / 2, y: i < 3 ? 128 : 240 } }; });
+        places = facilities([{ x: 336, y: 352 }, { x: 440, y: 352 }, { x: 176, y: 352 }, { x: 584, y: 352 }, { x: 80, y: 352 }, { x: 680, y: 352 }, { x: 680, y: 128 }]);
+        walkable = (x, y) => x >= 32 && x <= 720 && y >= 120 && y <= 360 && ([128, 240, 352].some(f => Math.abs(y - f) <= 8) || [240, 504].some(l => Math.abs(x - l) <= 8));
     }
     else if (variant === 'b') {
         w = 416;

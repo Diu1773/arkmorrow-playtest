@@ -765,14 +765,16 @@ function frame(now) {
         V.shake = save.settings.reduced ? 0 : sim.shake * save.settings.shake;
     }
     const scene = view === 'practice' ? practice?.sim ?? null : ['intro', 'title', 'result'].includes(view) || (!sim && (view === 'shop' || view === 'settings')) ? null : sim;
-    if (scene && !save.settings.numbers) {
-        const f = scene.floaters;
-        scene.floaters = [];
-        cosmos.render(scene, V, { lang: save.settings.lang, reduced: save.settings.reduced, quality: quality === 'low' || quality === 'auto' && frameStats.autoLow ? 'low' : 'high', effectsOpacity: 1 - effectsTransparency, largeProjectiles, telegraphs: save.settings.telegraphs });
-        scene.floaters = f;
+    if (view !== 'title') {
+        if (scene && !save.settings.numbers) {
+            const f = scene.floaters;
+            scene.floaters = [];
+            cosmos.render(scene, V, { lang: save.settings.lang, reduced: save.settings.reduced, quality: quality === 'low' || quality === 'auto' && frameStats.autoLow ? 'low' : 'high', effectsOpacity: 1 - effectsTransparency, largeProjectiles, telegraphs: save.settings.telegraphs });
+            scene.floaters = f;
+        }
+        else
+            cosmos.render(scene, V, { lang: save.settings.lang, reduced: save.settings.reduced, quality: quality === 'low' || quality === 'auto' && frameStats.autoLow ? 'low' : 'high', effectsOpacity: 1 - effectsTransparency, largeProjectiles, telegraphs: save.settings.telegraphs });
     }
-    else
-        cosmos.render(scene, V, { lang: save.settings.lang, reduced: save.settings.reduced, quality: quality === 'low' || quality === 'auto' && frameStats.autoLow ? 'low' : 'high', effectsOpacity: 1 - effectsTransparency, largeProjectiles, telegraphs: save.settings.telegraphs });
     audio.tick();
     animateResults(now);
     if (view === 'playing' && now - hudTime > 100) {

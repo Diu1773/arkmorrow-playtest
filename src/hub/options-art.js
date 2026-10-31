@@ -2,6 +2,7 @@ import { crewSprite } from '../crew.js';
 import { crewUnlocked } from '../chapters.js';
 import { ROOMS } from '../base-rooms.js';
 import { speakers, deckDetails } from '../dialogue/data.js';
+import { arkArt } from './ark-art.js';
 const ink = '#101722', hull = '#46566a', edge = '#83959a', dark = '#1f2d3c', light = '#a2d4c8', amber = '#e2a65a', teal = '#71d6ce';
 const box = (c, x, y, w, h, color) => { c.fillStyle = color; c.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); };
 function plate(c, x, y, w, h, color = hull) { box(c, x - 2, y - 2, w + 4, h + 4, ink); box(c, x, y, w, h, color); box(c, x, y, w, 2, edge); box(c, x + 2, y + h - 3, w - 4, 3, dark); }
@@ -144,43 +145,17 @@ export function capsuleArt(c, x, y) {
     box(c, x - 6, y + 1, 12, 2, amber);
 }
 export function optionArt(canvas, deck, cleared, returns, time, lang, camera, states) {
+    if (deck.layout?.variant === 'a') {
+        arkArt(canvas, deck, cleared, returns, time, lang, camera, states);
+        return;
+    }
     const l = deck.layout, c = canvas.getContext('2d'), detail = deckDetails[returns % deckDetails.length];
     c.imageSmoothingEnabled = false;
     box(c, 0, 0, canvas.width, canvas.height, '#0c1422');
     c.save();
     c.translate(-camera.x, -camera.y);
     space(c, l.w, l.h, time, l.variant === 'b');
-    if (l.variant === 'a') {
-        earth(c, 326, 35, time, returns);
-        plate(c, 24, 32, 592, 248, dark);
-        for (const y of [104, 184, 264]) {
-            box(c, 30, y + 6, 580, 8, hull);
-            box(c, 32, y + 6, 576, 2, edge);
-            box(c, 34, y + 14, 572, 3, ink);
-            for (let x = 40; x < 610; x += 40)
-                box(c, x, y + 9, 12, 2, amber);
-        }
-        for (const x of [216, 424]) {
-            box(c, x - 11, 96, 22, 170, ink);
-            box(c, x - 8, 96, 2, 170, edge);
-            box(c, x + 7, 96, 2, 170, edge);
-            for (let y = 100; y < 266; y += 8)
-                box(c, x - 8, y, 17, 2, amber);
-        }
-        for (const r of l.rooms)
-            room(c, r, states, lang, false);
-        box(c, 260, 35, 116, 20, '#101c31');
-        c.save();
-        c.beginPath();
-        c.rect(260, 35, 116, 20);
-        c.clip();
-        earth(c, 326, 42, time, returns);
-        c.restore();
-        box(c, 258, 55, 120, 3, edge);
-        label(c, lang === 'ko' ? '거주층' : 'HABITAT', 584, 220, edge, 6);
-        label(c, lang === 'ko' ? '승강 사다리 ↑↓' : 'LADDERS ↑↓', 320, 215, light, 7);
-    }
-    else if (l.variant === 'b') {
+    if (l.variant === 'b') {
         ellipse(c, 208, 152, 198, 140, ink);
         ellipse(c, 208, 152, 192, 134, hull);
         ellipse(c, 208, 152, 184, 126, edge);
@@ -236,7 +211,7 @@ export function optionArt(canvas, deck, cleared, returns, time, lang, camera, st
     for (const p of l.places.filter(p => !p.id.startsWith('room-') && p.id !== 'window')) {
         facility(c, p.id, p.x, p.y);
         if (l.variant !== 'c' || p.id === 'launch')
-            label(c, p[lang], p.x, p.y + 18, p.kind === 'launch' ? amber : edge, l.variant === 'a' ? 7 : 6);
+            label(c, p[lang], p.x, p.y + 18, p.kind === 'launch' ? amber : edge, 6);
     }
     const people = [...deck.actors().map(a => ({ ...a, direction: 0, frame: 0 })), { id: deck.crew, x: deck.x, y: deck.y, direction: deck.direction, frame: deck.walking ? 1 + Math.floor(deck.walking) % 2 : 0 }].sort((a, b) => a.y - b.y);
     for (const p of people) {
@@ -255,14 +230,4 @@ export function optionArt(canvas, deck, cleared, returns, time, lang, camera, st
             box(c, p.x - 4, p.y + 20, 8, 2, teal);
     }
     c.restore();
-    // A compact overview keeps facilities visible while the camera follows the crew.
-    if (l.variant === 'c')
-        return;
-    const mw = canvas.width < 300 ? 60 : 76, mh = canvas.width < 300 ? 38 : 48, mx = canvas.width - mw - 6, my = 8, s = Math.min(mw / l.w, (mh - 2) / l.h);
-    plate(c, mx, my, mw, mh, dark);
-    for (const r of l.rooms)
-        box(c, mx + r.x * s, my + r.y * s, Math.max(3, r.w * s), Math.max(3, r.h * s), states[r.id].restored ? teal : '#695d50');
-    for (const p of l.places.filter(p => p.id === 'launch'))
-        box(c, mx + p.x * s - 1, my + p.y * s - 1, 3, 3, amber);
-    box(c, mx + deck.x * s - 1, my + deck.y * s - 1, 3, 3, light);
 }

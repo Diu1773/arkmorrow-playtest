@@ -59,12 +59,14 @@ export function titleArt(canvas, time) {
     drawLogo(c, Math.floor((w - 53 * scale) / 2), h * .77, scale);
 }
 export function deckCamera(canvas, deck) {
-    const bounds = canvas.getBoundingClientRect(), width = bounds.width || window.innerWidth, height = bounds.height || window.innerHeight - 150, scale = width < 600 ? 2 : Math.max(1, Math.floor(Math.min(width / 320, height / 240))), w = Math.ceil(width / scale), h = Math.ceil(height / scale);
-    canvas.width = w;
-    canvas.height = h;
+    const bounds = canvas.getBoundingClientRect(), width = bounds.width || window.innerWidth, height = bounds.height || window.innerHeight - 150, scale = width < 600 ? 2 : deck.layout?.variant === 'a' ? Math.max(1, Math.floor(Math.min(width / (deck.layout.w + 32), height / (deck.layout.h + 32)))) : Math.max(1, Math.floor(Math.min(width / 320, height / 240))), w = Math.ceil(width / scale), h = Math.ceil(height / scale);
+    if (canvas.width !== w)
+        canvas.width = w;
+    if (canvas.height !== h)
+        canvas.height = h;
     if (deck.layout) {
-        const l = deck.layout;
-        return { x: Math.round(w >= l.w ? (l.w - w) / 2 : Math.max(0, Math.min(l.w - w, deck.x - w / 2))), y: Math.round(h >= l.h ? (l.h - h) / 2 : Math.max(0, Math.min(l.h - h, deck.y - h / 2))), w, h, scale };
+        const l = deck.layout, contentHeight = l.h + (l.variant === 'a' ? 40 : 0);
+        return { x: Math.round(w >= l.w ? (l.w - w) / 2 : Math.max(0, Math.min(l.w - w, deck.x - w / 2))), y: Math.round(h >= contentHeight ? (contentHeight - h) / 2 : Math.max(0, Math.min(contentHeight - h, deck.y - h / 2))), w, h, scale };
     }
     return { x: Math.round(Math.max(0, Math.min(DECK.w - w, deck.x - w / 2))), y: Math.round(Math.max(0, Math.min(DECK.h - h, deck.y - h / 2))), w, h, scale };
 }

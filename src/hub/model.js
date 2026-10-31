@@ -51,11 +51,22 @@ export class DeckState {
     arrive = '';
     crew;
     layout;
+    roomLighting = {};
+    roomChanges = new Map();
+    roomStates = {};
     constructor(crew, variant = '0') { this.crew = crew; if (variant !== '0') {
         this.layout = makeLayout(variant);
         this.returnToCapsule();
     } }
     get places() { return this.layout?.places ?? places; }
+    syncRooms(states, now, reduced = false) {
+        for (const id of Object.keys(states)) {
+            if (this.roomStates[id] === false && states[id].restored)
+                this.roomChanges.set(id, now);
+            this.roomLighting[id] = states[id].restored ? (reduced ? 1 : Math.min(1, Math.max(0, (now - (this.roomChanges.get(id) ?? -Infinity)) / 1.05))) : 0;
+            this.roomStates[id] = states[id].restored;
+        }
+    }
     setPortrait(portrait) { if (this.layout?.variant !== 'c' || (this.layout.w === 192) === portrait)
         return; const old = this.layout; this.layout = makeLayout('c', portrait); this.x = this.x / old.w * this.layout.w; this.stop(); if (!this.layout.walkable(this.x, this.y))
         this.returnToCapsule(); }
@@ -96,6 +107,13 @@ export class DeckState {
         if (length > 1) {
             x /= length;
             y /= length;
+        }
+        if (this.layout?.variant === 'a' && y && Math.abs(y) > Math.abs(x) && ![128, 240, 352].some(f => Math.abs(this.y - f) < 2)) {
+            const shaft = [240, 504].find(l => Math.abs(this.x - l) <= 8);
+            if (shaft !== undefined) {
+                this.x += (shaft - this.x) * Math.min(1, dt * 20);
+                x = 0;
+            }
         }
         const speed = CREW.find(c => c.id === this.crew).speed * .57, k = weighted ? 1 - Math.exp(-18 * dt) : 1;
         this.vx += (x * speed - this.vx) * k;

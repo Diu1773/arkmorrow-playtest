@@ -2,12 +2,12 @@ import { CREW_SKILL, skillDef } from '../combat-catalog.js';
 import { DeckState } from './model.js';
 import { hubVariant } from './layouts.js';
 import { deckArt, deckCamera, portraitArt } from './art.js';
+import { overviewArt } from './ark-art.js';
 import { crewPanel, dialogueUI, unlockText } from './ui.js';
 import { DialoguePlayer, pickDialogue, markSeen } from '../dialogue/model.js';
 import { deckDetails, speakers } from '../dialogue/data.js';
 import { CREW } from '../crew.js';
 import { crewUnlocked } from '../chapters.js';
-import { clamp } from '../core.js';
 import { t } from '../i18n.js';
 export function createDeckController(o) {
     const app = o.app, deck = new DeckState(o.save().crew, hubVariant(location.search)), persist = o.persist, toast = o.toast;
@@ -139,8 +139,19 @@ export function createDeckController(o) {
                 interact(arrived);
         }
         deck.setPortrait((ca.getBoundingClientRect().width || window.innerWidth) < 600);
+        deck.syncRooms(save.rooms, now / 1000, save.settings.reduced);
         const camera = deckCamera(ca, deck);
         deckArt(ca, deck, save.equipment.cleared, save.story.returns, save.settings.reduced ? 0 : now / 1000, save.settings.lang, camera, save.rooms);
+        const overview = app.querySelector('#deck-overview');
+        if (overview)
+            overviewArt(overview, deck, save.rooms);
+        const restored = app.querySelector('#deck-restored');
+        if (restored) {
+            const n = Object.values(save.rooms).filter(r => r.restored).length;
+            const text = save.settings.lang === 'ko' ? `방 복구 ${n}/6` : `Rooms ${n}/6`;
+            if (restored.textContent !== text)
+                restored.textContent = text;
+        }
         const prompt = app.querySelector('#deck-prompt'), near = deck.nearby();
         if (prompt) {
             prompt.hidden = !active || !!panelId || !!storyPlayer || !near;
@@ -148,17 +159,15 @@ export function createDeckController(o) {
                 const label = near.kind === 'crew' ? `${btn('hub-talk', save.settings.lang === 'ko' ? 'E 대화' : 'E Talk', 'small', `data-id="${near.id}"`)}${btn('hub-switch', crewUnlocked(near.id, save.equipment.cleared) ? save.settings.lang === 'ko' ? 'F 교대' : 'F Switch' : unlockText(near.id, save.settings.lang), 'small', `data-id="${near.id}"`)}` : btn('hub-interact', near[save.settings.lang], 'small', `data-id="${near.id}"`);
                 if (prompt.innerHTML !== label)
                     prompt.innerHTML = label;
-                prompt.style.left = `${clamp((deck.x - camera.x) / camera.w * 100, 18, 82)}%`;
-                prompt.style.top = `${clamp((deck.y - camera.y - 48) / camera.h * 100, 8, 80)}%`;
             }
         }
         const name = app.querySelector('#deck-crew');
-        if (name)
+        if (name && name.textContent !== speakers[save.crew].name)
             name.textContent = speakers[save.crew].name;
         const code = app.querySelector('#return-code');
         if (code) {
-            code.hidden = now >= returnFlashUntil;
-            if (!code.hidden)
+            code.hidden = now >= returnFlashUntil || now < crewFlashUntil;
+            if (!code.hidden && code.textContent !== deckDetails[save.story.returns % deckDetails.length].code)
                 code.textContent = deckDetails[save.story.returns % deckDetails.length].code;
         }
         const flash = app.querySelector('#crew-flash');
@@ -166,7 +175,9 @@ export function createDeckController(o) {
             flash.hidden = now >= crewFlashUntil;
             if (!flash.hidden) {
                 const person = CREW.find(c => c.id === deck.crew);
-                flash.textContent = person.name + ' / ' + skillDef(CREW_SKILL[person.id]).name;
+                const text = person.name + ' / ' + skillDef(CREW_SKILL[person.id]).name;
+                if (flash.textContent !== text)
+                    flash.textContent = text;
             }
         }
         if (storyPlayer) {
