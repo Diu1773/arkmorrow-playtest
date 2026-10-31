@@ -1,3 +1,4 @@
+import {drawRoute} from './route-art.js';
 import {drawSkillFields} from './combat-art.js';
 import {EffectRenderer} from './vfx-art.js';
 const vfx=new EffectRenderer();
@@ -180,6 +181,7 @@ function arrivals(G){
 }
 export function render(G,V,settings={}){setup();if(!ctx||ctx.lost)return;if(canvas.width!==Math.ceil(V.w/Math.max(1,Math.round((V.w<V.h?Math.min(V.w/195,V.h/422):V.h/360))))||canvas.height!==Math.ceil(V.h/Math.max(1,Math.round((V.w<V.h?Math.min(V.w/195,V.h/422):V.h/360)))))resize(V.w,V.h);v={...V,reduced:settings.reduced};const entrance=G?.bossRecords?.at(-1),intro=entrance?G.time-entrance.spawned:10;if(intro>=0&&intro<1.2&&!settings.reduced)v.scale*=1+.06*Math.sin(intro/1.2*Math.PI);lowQuality=settings.quality==='low';lang=settings.lang||'ko';unit=v.scale/zoom;vfx.bind(G,{X,Y,unit,w:cw,h:ch,time:v.time,low:lowQuality,reduced:!!settings.reduced,large:settings.largeProjectiles!==false});const shake=settings.reduced?0:Math.min((v.shake||0)+vfx.feedback(),8);v.camX-=Math.round(shake*Math.sin(v.time*61)/zoom)/unit;v.camY-=Math.round(shake*Math.cos(v.time*49)/zoom)/unit;ctx.setTransform(1,0,0,1,0,0);ctx.imageSmoothingEnabled=false;ctx.globalAlpha=1;background(G);lastTime=v.time;if(!G){ctx.flush?.();return;}if(G.launchAge>=0){if(ctx.backend==='WebGL'){launchCanvas??=document.createElement('canvas');if(launchCanvas.width!==cw||launchCanvas.height!==ch){launchCanvas.width=cw;launchCanvas.height=ch;}launchCanvas.pixelDynamic=true;const c=launchCanvas.getContext('2d');c.clearRect(0,0,cw,ch);drawLaunch(c,G,cw,ch,lowQuality,settings.reduced);ctx.drawImage(launchCanvas,0,0);ctx.flush();}else drawLaunch(ctx,G,cw,ch,lowQuality,settings.reduced);return;}
  if(G.expedition&&['launch','atmosphere','village'].includes(G.chapter?.id))drawProps(ctx,G,X,Y,unit,v.time);else {terrain(G);for(const o of G.obstacles||[])stamp(o.kind||'debris',o.x,o.y,o.r*3.2,o.angle||0);}
+ if(G.objects&&G.doors)drawRoute(ctx,G,X,Y,unit);
  wline(18,18,4782,18,'#637386',3,true);wline(18,18,18,3182,'#637386',3,true);wline(4782,18,4782,3182,'#637386',3,true);wline(18,3182,4782,3182,'#637386',3,true);
  arrivals(G);paintBossArena(ctx,G,X,Y,unit);
  const crowded=(G.enemies?.length||0)>220||(G.shots?.length||0)+(G.effects?.length||0)>160;fxPressure=(G.enemies?.length||0)>700?2:crowded?1:0;
