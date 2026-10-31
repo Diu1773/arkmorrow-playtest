@@ -59,7 +59,7 @@ export function titleArt(canvas, time) {
     drawLogo(c, Math.floor((w - 53 * scale) / 2), h * .77, scale);
 }
 export function deckCamera(canvas, deck) {
-    const bounds = canvas.getBoundingClientRect(), width = bounds.width || window.innerWidth, height = bounds.height || window.innerHeight - 150, scale = width < 600 ? 2 : deck.layout?.variant === 'a' ? Math.max(1, Math.floor(Math.min(width / (deck.layout.w + 32), height / (deck.layout.h + 32)))) : Math.max(1, Math.floor(Math.min(width / 320, height / 240))), w = Math.ceil(width / scale), h = Math.ceil(height / scale);
+    const bounds = canvas.getBoundingClientRect(), width = bounds.width || window.innerWidth, height = bounds.height || window.innerHeight - 150, scale = width < 600 ? 2 : deck.layout?.variant === 'a' ? (height / 300 >= 2 ? Math.floor(height / 300) : height / 300 >= 1.5 ? 1.5 : 1) : Math.max(1, Math.floor(Math.min(width / 320, height / 240))), w = Math.ceil(width / scale), h = Math.ceil(height / scale);
     if (canvas.width !== w)
         canvas.width = w;
     if (canvas.height !== h)
