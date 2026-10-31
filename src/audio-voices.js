@@ -16,6 +16,8 @@ export class VoiceManager {
     constructor(publicLimit = VOICE_LIMIT, random = Math.random) { this.limit = publicLimit; this.random = random; }
     limit;
     random;
+    variantCount = (_id) => VARIANTS;
+    duration = (id, _variant) => soundDuration(id);
     prune(now) { this.active = this.active.filter(v => v.end > now); }
     release(token) { this.active = this.active.filter(v => v.token !== token); }
     flush(requests, now, view) {
@@ -57,12 +59,12 @@ export class VoiceManager {
                 this.pickupAt = now;
                 pitch *= 2 ** ([0, 2, 4, 5, 7, 9, 11, 12][this.pickupStep] / 12);
             }
-            const variant = ((this.variant.get(r.id) ?? -1) + 1) % VARIANTS;
+            const count = this.variantCount(r.id), variant = r.variant !== undefined ? Math.max(0, Math.min(count - 1, r.variant)) : ((this.variant.get(r.id) ?? -1) + 1) % count;
             this.variant.set(r.id, variant);
             const jitter = 2 ** ((this.random() - .5) * .22 / 12);
             pitch *= jitter;
             const gain = (r.id === 'air' ? .012 : rule.hit ? .09 : rule.tiny ? .20 : .60) * (r.gain ?? 1) * (1 + Math.min(5, (r.count ?? 1) - 1) * .055);
-            const voice = { token: this.nextToken++, id: r.id, start: now, end: now + soundDuration(r.id) / pitch, priority: rule.priority, gain, pitch, pan: view && r.x !== undefined ? Math.max(-.5, Math.min(.5, (r.x - view.x) / view.width)) : 0, variant };
+            const voice = { token: this.nextToken++, id: r.id, start: now, end: now + this.duration(r.id, variant) / pitch, priority: rule.priority, gain, pitch, pan: view && r.x !== undefined ? Math.max(-.5, Math.min(.5, (r.x - view.x) / view.width)) : 0, variant };
             this.last.set(r.id, now);
             this.active.push(voice);
             started.push(voice);

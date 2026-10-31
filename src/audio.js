@@ -3,6 +3,9 @@ import { musicIntensity, VARIANTS } from './audio-score.js';
 import { VoiceManager, soundRule } from './audio-voices.js';
 import { SampleBank } from './audio-samples.js';
 import { MusicStream, musicOption, musicRole } from './audio-music.js';
+import { DEV } from './env.js';
+import { CandidateLibrary } from './audio-candidates.js';
+import { candidateURL } from './audio-assignments.js';
 export class AudioEngine {
     ctx = null;
     master = null;
@@ -27,7 +30,10 @@ export class AudioEngine {
     stream = null;
     bank = null;
     ready = null;
-    constructor(settings) { this.settings = settings; }
+    candidates = DEV ? new CandidateLibrary() : null;
+    constructor(settings) { this.settings = settings; this.voices.variantCount = id => this.candidates?.sounds(id).length || VARIANTS; const duration = this.voices.duration; this.voices.duration = (id, variant) => { const clip = this.candidates?.sounds(id)[variant]; return clip ? clip.end - clip.start : duration(id, variant); }; }
+    async applyAssignments(value) { const saved = this.candidates?.assign(value) ?? false; if (this.ctx)
+        await this.candidates?.loadSounds(this.ctx); return saved; }
     setMusicOption(option) { this.option = option; }
     async unlock() {
         try {
@@ -58,7 +64,12 @@ export class AudioEngine {
             await resumed;
             if (this.bank) {
                 this.ready = this.bank.load();
-                await this.ready;
+                if (this.candidates) {
+                    this.candidates.failures.clear();
+                    await Promise.all([this.ready, this.candidates.loadSounds(this.ctx)]);
+                }
+                else
+                    await this.ready;
             }
         }
         catch { /* A later gesture can retry suspended playback. */ }
@@ -68,10 +79,10 @@ export class AudioEngine {
     setPlaying(playing) { this.setScene(playing ? 'playing' : 'pause'); }
     setScene(scene) {
         this.manual = false;
-        const active = scene === 'playing' || scene === 'title' || scene === 'shop' || scene === 'settings' || scene === 'equipment' || scene === 'fusion' || scene === 'gacha' || scene === 'chapters';
+        const active = scene === 'playing' || scene === 'title' || scene === 'refuge' || scene === 'shop' || scene === 'settings' || scene === 'equipment' || scene === 'fusion' || scene === 'gacha' || scene === 'chapters';
         this.playing = active;
         if (scene !== 'playing') {
-            this.requestedTrack = scene === 'shop' ? 'refuge' : 'title';
+            this.requestedTrack = scene === 'shop' || scene === 'refuge' ? 'refuge' : 'title';
             this.requestedIntensity = 1;
         }
         if (!active)
@@ -93,7 +104,7 @@ export class AudioEngine {
         node.source.stop();
     }
     catch { /* Finished buffers need no second stop. */ } node.source.disconnect(); node.gain.disconnect(); node.pan.disconnect(); }
-    node(buffer, at, gain, pan, destination, pitch = 1) {
+    node(buffer, at, gain, pan, destination, pitch = 1, offset = 0, duration = buffer.duration - offset) {
         const ctx = this.ctx, source = ctx.createBufferSource(), level = ctx.createGain(), position = ctx.createStereoPanner();
         source.buffer = buffer;
         source.playbackRate.value = pitch;
@@ -102,19 +113,24 @@ export class AudioEngine {
         source.connect(level);
         level.connect(position);
         position.connect(destination);
-        source.start(at);
-        return { source, gain: level, pan: position, start: at, end: at + buffer.duration / pitch };
+        source.start(at, offset, duration);
+        return { source, gain: level, pan: position, start: at, end: at + duration / pitch };
     }
     startVoice(voice) {
-        const buffer = this.bank?.sound(voice.id, voice.variant);
+        const clip = this.candidates?.sounds(voice.id)[voice.variant], buffer = clip ? this.candidates?.buffers.get(clip.candidate) : this.bank?.sound(voice.id, voice.variant % VARIANTS);
         if (!buffer) {
             this.voices.release(voice.token);
             return;
         }
-        const node = this.node(buffer, voice.start, voice.gain, voice.pan, soundRule(voice.id).tiny ? this.small : this.sfx, voice.pitch);
+        const offset = clip?.start ?? 0, duration = Math.min(buffer.duration - offset, clip ? clip.end - offset : buffer.duration), gain = voice.gain * (clip?.gain ?? 1);
+        if (duration <= 0) {
+            this.voices.release(voice.token);
+            return;
+        }
+        const node = this.node(buffer, voice.start, gain, voice.pan, soundRule(voice.id).tiny ? this.small : this.sfx, voice.pitch, offset, duration);
         this.nodes.set(voice.token, node);
         const end = Math.min(node.end, voice.end);
-        node.gain.gain.setValueAtTime(voice.gain, Math.max(voice.start, end - .015));
+        node.gain.gain.setValueAtTime(gain, Math.max(voice.start, end - .015));
         node.gain.gain.linearRampToValueAtTime(0, end);
         node.source.stop(end);
         node.end = end;
@@ -187,7 +203,7 @@ export class AudioEngine {
                 this.releaseNode(node);
                 this.nodes.delete(token);
             }
-        const queued = this.queue.splice(0), available = queued.filter(r => !!this.bank?.sound(r.id, this.voices.variant.has(r.id) ? (this.voices.variant.get(r.id) + 1) % VARIANTS : 0));
+        const queued = this.queue.splice(0), available = queued.filter(r => !!this.candidates?.sounds(r.id).length || !!this.bank?.sound(r.id, this.voices.variant.has(r.id) ? (this.voices.variant.get(r.id) + 1) % VARIANTS : 0));
         if (this.bank?.loading)
             this.queue.push(...queued.filter(r => !available.includes(r)).slice(-32));
         const result = this.voices.flush(available, now, this.spatial);
@@ -213,10 +229,13 @@ export class AudioEngine {
         }
         if (now < this.victoryUntil)
             return;
-        if (this.bank?.manifest) {
-            this.stream?.select(this.bank.manifest, this.option, musicRole(this.requestedTrack), this.requestedIntensity);
-            this.track = this.requestedTrack;
-            this.intensity = this.requestedIntensity;
+        const selection = this.candidates?.music(this.requestedTrack, this.requestedIntensity), file = selection ? candidateURL(selection.asset) : undefined;
+        if (selection && file && !this.stream?.failures.has(file)) {
+            this.stream?.selectAsset({ file, loopStart: selection.clip.start, loopEnd: selection.clip.end }, this.requestedIntensity, selection.clip.gain);
         }
+        else if (this.bank?.manifest)
+            this.stream?.select(this.bank.manifest, this.option, musicRole(this.requestedTrack), this.requestedIntensity);
+        this.track = this.requestedTrack;
+        this.intensity = this.requestedIntensity;
     }
 }

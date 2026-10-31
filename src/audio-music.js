@@ -34,19 +34,23 @@ export class MusicStream {
         }
     }
     select(manifest, option, role, intensity) {
+        const asset = manifest.music.find(s => s.option === option && s.role === role);
+        if (asset)
+            this.selectAsset(asset, intensity);
+    }
+    selectAsset(asset, intensity, gain = 1) {
         this.enabled = true;
         this.tick();
-        const asset = manifest.music.find(s => s.option === option && s.role === role);
-        if (!asset)
-            return;
         const key = asset.file;
         for (const deck of this.decks) {
-            deck.level.gain.setTargetAtTime([.68, .84, 1][intensity - 1], this.ctx.currentTime, .35);
+            if (deck.key === key)
+                deck.level.gain.setTargetAtTime([.68, .84, 1][intensity - 1] * gain, this.ctx.currentTime, .35);
             deck.filter.frequency.setTargetAtTime([6500, 10500, 18000][intensity - 1], this.ctx.currentTime, .35);
         }
         if (this.pending >= 0 && this.decks[this.pending].key === key)
             return;
         if (this.current >= 0 && this.decks[this.current].key === key) {
+            this.decks[this.current].asset = asset;
             if (this.pending >= 0) {
                 this.clear(this.decks[this.pending]);
                 this.pending = -1;
@@ -60,6 +64,7 @@ export class MusicStream {
         this.pending = index;
         deck.key = key;
         deck.asset = asset;
+        deck.level.gain.setValueAtTime([.68, .84, 1][intensity - 1] * gain, this.ctx.currentTime);
         deck.element.preload = 'auto';
         deck.element.src = new URL(asset.file, this.base).href;
         deck.element.loop = asset.loopStart === 0;

@@ -165,3 +165,15 @@ button,select,summary,input[type=range],input[type=checkbox]{min-height:44px;min
 .deck-status [hidden]{display:none}
 .deck-readout:has(.deck-status>div:not([hidden])) #deck-prompt{display:none}
 @media(max-width:600px){.deck-status{grid-column:1/-1;grid-row:2;margin:0;text-align:center}.deck-status #return-code,.deck-status #crew-flash{font-size:10px}}
+/* The editor shares the game's panels and stays scrollable on narrow screens. */
+#soundboard{width:min(1200px,96vw);max-height:94vh;overflow:auto;padding:20px;pointer-events:auto}
+.soundboard-tools,.soundboard-fields{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.soundboard-tools{position:sticky;top:0;background:#17242f;padding:10px;z-index:1;border-bottom:3px solid #dc963c}
+.soundboard-row{padding:14px;margin:12px 0;border:2px solid #586c79;background:#1c2a36}
+.soundboard-row[hidden]{display:none}
+.soundboard-row h3{color:#ffbf5a;margin:0 0 10px}.soundboard-row h3 small{color:#afc2cd;font-size:12px}
+.soundboard-fields label{display:flex;flex-direction:column;gap:6px;font-size:13px}.soundboard-candidate{flex:1;min-width:190px;max-width:100%}
+.soundboard-fields select,.soundboard-fields input,.soundboard-tools input{font:inherit;color:inherit;background:#101b24;border:2px solid #647783;padding:7px;min-height:38px;max-width:100%}
+.soundboard-fields input{width:94px}.soundboard-terms{font-size:12px;color:#bac9cf;line-height:1.6}
+#soundboard summary{cursor:pointer;color:#ffbc5b;padding:12px 0}#soundboard-export{width:100%;font-size:12px;color:#e5eef1;background:#101b24}
+@media(max-width:600px){#soundboard{padding:10px}.soundboard-tools{position:static}.soundboard-candidate{flex-basis:100%}.soundboard-fields input{width:75px}}

@@ -31,6 +31,8 @@ import { drawGearIcons } from './equipment-art.js';
 import { icon } from './icons.js';
 import * as cosmos from './cosmos.js';
 import { AudioEngine } from './audio.js';
+import { mountSoundboard } from './soundboard.js';
+import { ASSIGNMENT_KEY } from './audio-assignments.js';
 import { FrameStats, browserName, playtestRecord } from './playtest.js';
 import { DEV, PLAYTEST } from './env.js';
 import { TRACKS, SFX_IDS } from './audio-score.js';
@@ -127,7 +129,7 @@ catch {
 function resetInput() { frameStats.break(); const stick = document.getElementById('joystick'); stick?.classList.remove('active'); stick?.removeAttribute('style'); keys.clear(); pointer.down = pointer.aim = false; joy.x = joy.y = 0; joy.id = -1; dashPressed = false; skillPressed = [false, false]; acc = 0; }
 function focusFirst() { (app.querySelector('.meta-sheet button:not(:disabled),.meta-sheet select') ?? app.querySelector('[data-autofocus]:not(:disabled)') ?? app.querySelector('button:not(:disabled),select,input'))?.focus({ preventScroll: true }); }
 function visibleEnemies() { return sim?.enemies.reduce((n, e) => n + Number(e.hp > 0 && !e.hidden && Math.abs(e.x - V.camX) < V.w / V.scale / 2 + e.r && Math.abs(e.y - V.camY) < V.h / V.scale / 2 + e.r), 0) ?? 0; }
-function setView(next) { document.getElementById('toast')?.setAttribute('hidden', ''); toastUntil = 0; app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(view === 'intro' || view === 'title' || view === 'practice' ? 'title' : view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim)
+function setView(next) { document.getElementById('toast')?.setAttribute('hidden', ''); toastUntil = 0; app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(view === 'intro' ? 'title' : view === 'title' || view === 'practice' ? 'refuge' : view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim)
     audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id); drawUI(); }
 function drawIcons() {
     for (const ca of app.querySelectorAll('[data-crew]')) {
@@ -215,6 +217,11 @@ function drawUI() {
     document.documentElement.lang = save.settings.lang;
     document.documentElement.classList.toggle('motion-reduced', save.settings.reduced);
     document.title = tr('title');
+    if (DEV && view === 'soundboard') {
+        app.innerHTML = '<div id="overlay"><section id="soundboard" class="panel" aria-label="소리 갈아끼우기"></section></div>';
+        void mountSoundboard(app.querySelector('#soundboard'), audio, () => setView('title'));
+        return;
+    }
     if (view === 'intro') {
         app.innerHTML = introUI(save.settings.lang);
         titleArt(app.querySelector('#intro-canvas'), performance.now() / 1000);
@@ -736,6 +743,8 @@ function frame(now) {
     }
     if (view === 'title' || view === 'result')
         hub.paint(now, delta, view === 'title');
+    if (view === 'title' && !audio.manual)
+        audio.requestedIntensity = hub.storyPlayer ? 2 : 1;
     if (view === 'practice' && practice) {
         practice.step(delta, inputState());
         V.camX = practice.sim.player.x;
@@ -897,6 +906,13 @@ else if (k === 'reduced' || k === 'numbers' || k === 'lessNotices') {
     persist();
 } });
 window.addEventListener('keydown', e => {
+    if (DEV && view === 'soundboard') {
+        if (e.code === 'Escape') {
+            audio.stop();
+            setView('title');
+        }
+        return;
+    }
     if (metaScreen.overlay && (e.code === 'Escape' || e.code === 'Space')) {
         e.preventDefault();
         action(e.code === 'Space' && metaScreen.overlay === 'result' ? 'meta-skip' : 'meta-close');
@@ -1008,7 +1024,7 @@ document.addEventListener('visibilitychange', () => { resetInput(); if (document
     void audio.ctx?.suspend?.().catch(() => { });
 }
 else if (view !== 'pause')
-    audio.setScene(view === 'intro' || view === 'title' || view === 'practice' ? 'title' : view === 'settings' && sim ? 'pause' : view); });
+    audio.setScene(view === 'intro' ? 'title' : view === 'title' || view === 'practice' ? 'refuge' : view === 'settings' && sim ? 'pause' : view); });
 const canvas = document.querySelector('#world');
 canvas.addEventListener('webglcontextlost', () => { if (view === 'playing')
     action('pause'); });
@@ -1059,6 +1075,12 @@ for (const image of [...new Set(SECTORS.map(s => s.image).concat(['horsehead.jpg
 }
 if (storageRaw && !parsed.future && !parsed.warning && [2, 3, 4, 5].includes(JSON.parse(storageRaw).version))
     persist();
+if (DEV)
+    window.addEventListener('storage', event => { if (event.key === ASSIGNMENT_KEY && audio.candidates) {
+        audio.candidates.reload();
+        if (audio.ctx)
+            void audio.candidates.loadSounds(audio.ctx);
+    } });
 audio.setScene('title');
 resize();
 drawUI();
@@ -1066,6 +1088,13 @@ requestAnimationFrame(frame);
 if (parsed.warning || storageReadFailed)
     toast(tr(parsed.future ? 'futureSave' : 'saveWarning'));
 function previewScreen(screen) {
+    if (DEV && screen === 'soundboard') {
+        sim = null;
+        audio.stop();
+        view = 'soundboard';
+        drawUI();
+        return;
+    }
     metaScreen.reset();
     audio.stop();
     hub.clearFlashes();
