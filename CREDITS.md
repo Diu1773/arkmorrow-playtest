@@ -1,6 +1,6 @@
 # COSMOS — 사진·글꼴 출처
 
-COSMOS v2.3의 강철 패널, 주황 띠, 기체와 적의 실루엣을 이어 쓴다. 원본은 `reference/cosmos-io-v2.3/`에 보존한다. 이번 도트판의 기체·적·보스·물건·아이콘은 `src/pixel-art.ts`의 문자 격자와 팔레트로 새로 찍었다. 로고 글자도 직접 찍었으며 패널·버튼 그림은 `scripts/art-preview.mjs`에서 만든다. 새 외부 그림을 내려받지 않았다. 소리는 Web Audio 합성이다.
+COSMOS v2.3의 강철 패널, 주황 띠, 기체와 적의 실루엣을 이어 쓴다. 원본은 `reference/cosmos-io-v2.3/`에 보존한다. 이번 도트판의 기체·적·보스·물건·아이콘은 `src/pixel-art.ts`의 문자 격자와 팔레트로 새로 찍었다. 로고 글자도 직접 찍었으며 패널·버튼 그림은 `scripts/art-preview.mjs`에서 만든다. 새 외부 그림을 내려받지 않았다. 음악은 완성곡을 스트리밍하고 효과음은 녹음 파일을 재생한다.
 
 ## 갈무리 글꼴
 
@@ -135,8 +135,13 @@ Size: 1280 x 1280, 274931 bytes
 
 게임 실행 중 외부 라이브러리 요청은 없다. TypeScript(검사·빌드), Happy DOM와 @napi-rs/canvas(개발 검사), Node.js 타입 정의는 개발용이며 게임 빌드에는 넣지 않는다. 버전은 `package-lock.json`에 기록한다. 두 reference 폴더와 이전 검사 결과는 보존한다.
 
-## 오케스트라 샘플과 녹음 효과음
+## 음악과 효과음
 
-- VS Chamber Orchestra 2 Community Edition / Versilian Studios. Recorded by Sam Gossner & Simon Dalzell; sample cutting by Elan Hickler / Soundemote. CC0 1.0 Universal, commercial use and redistribution permitted. Source: https://github.com/sgossner/VSCO-2-CE (revision 440300901dfe9275fd84e0b7763af1f8443ae62e). Selected strings, cello, contrabass, horn, trombone, harp and percussion recordings were trimmed, faded, downmixed and AAC compressed. License: assets/audio/LICENSES/orchestra.txt.
-- Impact Sounds 1.0 / Kenney (www.kenney.nl). CC0 1.0 Universal, commercial use and redistribution permitted. Source: https://kenney.nl/assets/impact-sounds. Selected foley recordings were trimmed, filtered, pitched, layered with acoustic instrument recordings and AAC compressed. License: assets/audio/LICENSES/effects.txt.
-- Music notation, arrangements and short diffuse room impulse: original project work. File-by-file source and processing record: docs/audio_sources.md in the source workspace. No complete third-party song was incorporated.
+음악 9곡과 효과음 46종은 CC0 1.0으로 공개된 완성 음원이다. 원 제작자의 저작자 표기와 상업 이용·변경 허용 원문을 함께 배포한다.
+
+- 음악: [음악 라이선스](assets/audio/LICENSES/music.txt)
+- 전투 효과음: [효과음 라이선스](assets/audio/LICENSES/scifi.txt)
+- 메뉴와 신호음: [인터페이스 라이선스](assets/audio/LICENSES/interface.txt)
+- 발소리와 동작: [폴리 라이선스](assets/audio/LICENSES/foley.txt)
+
+앞뒤 무음 정리·길이 제한·선형 음량·짧은 페이드·AAC 압축을 적용했다. 원 제작자의 보증이나 후원을 뜻하지 않는다. 파일별 원본·가공 내역은 소스 작업 공간의 docs/audio_sources.md에 있다.

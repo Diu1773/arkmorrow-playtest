@@ -423,7 +423,7 @@ export class Simulation {
             return null;
         const p = this.player, def = ENEMIES[type], a = this.random() * TAU, d = 640 + this.random() * 120;
         const hp = def.hp * (type === 'boss' ? (role === 'middle' ? .32 : 1) : hpScale(this.timeline)) * (1 + this.sector * .22) * this.mode.hp * (elite ? 6 : 1) * (this.chapter?.hp ?? 1);
-        Object.assign(e, { escort: false, offscreenLag: 0, crowd, id: this.nextId++, type, x: clamp(x ?? p.x + Math.cos(a) * d, 35, 4765), y: clamp(y ?? p.y + Math.sin(a) * d, 35, 3165), r: def.r * (elite ? 1.5 : role === 'captain' ? .85 : type === 'boss' ? 1.15 : 1), angle: a, hp, maxHp: hp, speed: def.speed * (elite ? .8 : 1), damage: def.damage * this.mode.damage * (1 + this.sector * .08), xp: def.xp * (elite ? 5 : 1) * (type === 'boss' ? 1 : this.timeline >= ENEMY_XP.lateAt ? ENEMY_XP.late : 1), age: 0, timer: 2 + this.random(), flash: 0, orbitHit: -10, warnTime: 0, warnDuration: 0, attackFlash: 0, lastAttack: null, pendingAttack: null, attackIndex: 0, phase: 0, hidden: false, shielded: ENEMY_BEHAVIOR[type] === 'shield', mirror: 0, elite, role, bossArt: this.sector, stages: type === 'boss' ? (role === 'captain' ? 2 : 3) : 1, stageGuard: 0, leader: 0, offX: 0, offY: 0, arm: this.nextId % 2, ti: 20, dir: 1, ttl: 12, status: emptyStatus(), behaviorCD: 2 + this.combatRandom() * 2, action: '', actionTime: 0, actionAngle: a, targetX: 0, targetY: 0, prefix: elite ? ELITES[Math.floor(this.combatRandom() * ELITES.length)] : '' });
+        Object.assign(e, { escort: false, offscreenLag: 0, crowd, id: this.nextId++, type, x: clamp(x ?? p.x + Math.cos(a) * d, 35, 4765), y: clamp(y ?? p.y + Math.sin(a) * d, 35, 3165), r: def.r * (elite ? 1.5 : role === 'captain' ? .85 : type === 'boss' ? 1.15 : 1), angle: a, hp, maxHp: hp, speed: def.speed * (elite ? .8 : 1), damage: def.damage * this.mode.damage * (1 + this.sector * .08) * (this.expedition ? 1 : .25), xp: def.xp * (elite ? 5 : 1) * (type === 'boss' ? 1 : this.timeline >= ENEMY_XP.lateAt ? ENEMY_XP.late : 1), age: 0, timer: 2 + this.random(), flash: 0, orbitHit: -10, warnTime: 0, warnDuration: 0, attackFlash: 0, lastAttack: null, pendingAttack: null, attackIndex: 0, phase: 0, hidden: false, shielded: ENEMY_BEHAVIOR[type] === 'shield', mirror: 0, elite, role, bossArt: this.sector, stages: type === 'boss' ? (role === 'captain' ? 2 : 3) : 1, stageGuard: 0, leader: 0, offX: 0, offY: 0, arm: this.nextId % 2, ti: 20, dir: 1, ttl: 12, status: emptyStatus(), behaviorCD: 2 + this.combatRandom() * 2, action: '', actionTime: 0, actionAngle: a, targetX: 0, targetY: 0, prefix: elite ? ELITES[Math.floor(this.combatRandom() * ELITES.length)] : '' });
         if (e.prefix === 'swift')
             e.speed *= 1.55;
         if (e.prefix === 'armored') {
@@ -449,14 +449,14 @@ export class Simulation {
         return b;
     }
     effect(kind, x, y, radius, color, life = .5, damage = 0, x2 = 0, y2 = 0, repeat = false, weapon = 'pulse') { const e = this.effectPool.acquire(); if (!e)
-        return null; Object.assign(e, { kind, x, y, radius, color, ttl: life, life, damage, x2, y2, done: false, repeat, weapon, tick: 0, skillVisual: false }); e.hits.clear(); return e; }
+        return null; Object.assign(e, { kind, x, y, radius, color, ttl: life, life, damage, x2, y2, done: false, repeat, weapon, tick: 0, skillVisual: false, normalScale: 1 }); e.hits.clear(); return e; }
     nearest(x, y, radius, excluded) { return this.hash.nearest(x, y, radius, e => e.hp > 0 && !e.hidden && !excluded?.has(e.id) && (!this.expedition || Math.abs(e.x - this.player.x) <= this.viewWidth / 2 + e.r && Math.abs(e.y - this.player.y) <= this.viewHeight / 2 + e.r)); }
     hit(e, damage, weapon = 'pulse', reactive = true, origin = { x: this.player.x, y: this.player.y }) {
         if (e.hp <= 0 || e.hidden || e.mirror > 0 || e.stageGuard > 0)
             return;
         const t = this.equipment.traits, attributes = this.attributes, element = elementOf(weapon), crit = reactive && attributes.crit > 0 && this.combatRandom() < attributes.crit;
         const frontal = damage !== 0 && e.shielded && Math.cos(Math.atan2(origin.y - e.y, origin.x - e.x) - e.angle) > .45;
-        const before = e.hp, actual = damage === 0 ? 0 : damage * (frontal ? .2 : 1) * (e.prefix === 'armored' ? .72 : 1) * (e.type === 'boss' ? 1 + (t.bossDamage ?? 0) * .15 : 1) * (weapon === this.equipment.family ? 1 + (t.linkedPower ?? 0) * .6 : 1) * (1 + (this.passives[element] ?? 0) * .18) * (crit ? 1.8 : 1);
+        const before = e.hp, actual = damage === 0 ? 0 : damage * (frontal ? .2 : 1) * (e.prefix === 'armored' ? .72 : 1) * (e.type === 'boss' ? 1.35 * (1 + (t.bossDamage ?? 0) * .15) : 1) * (weapon === this.equipment.family ? 1 + (t.linkedPower ?? 0) * .6 : 1) * (1 + (this.passives[element] ?? 0) * .18) * (crit ? 1.8 : 1);
         e.hp -= actual;
         e.flash = .035;
         if (this.expedition && e.type !== 'boss') {
@@ -532,16 +532,16 @@ export class Simulation {
     } if (this.floaters.length < 24)
         this.floaters.push({ x, y, life: .65, text: String(value), color }); }
     hurt(raw, cause = 'unknown') { const p = this.player; if (p.invul > 0 || p.dashTime > 0 || this.invincible || this.status !== 'playing')
-        return; if (this.crewShield) {
+        return false; if (this.crewShield) {
         this.crewShield = false;
         p.invul = 1;
         this.effect('ring', p.x, p.y, 55, '#c9ffff', .35);
-        return;
+        return true;
     } const t = this.equipment.traits; if (t.lastShield && this.time >= this.shieldReady) {
         this.shieldReady = this.time + 60;
         p.invul = 1;
         this.effect('evolve', p.x, p.y, 100, '#f6c454', .45);
-        return;
+        return true;
     } this.lastDamageCause = cause; const damage = Math.max(1, raw * (this.chapter?.damage ?? 1) * this.chaos.incoming - this.attributes.armor); p.hp = Math.max(0, p.hp - damage); p.invul = this.mode.iframes; p.flash = .18; this.shake = 6; this.hitStop = .045; this.emit('hurt', p.x, p.y, Math.ceil(damage), '#ff746e'); this.damageNumber(p.x, p.y - 30, -Math.ceil(damage), '#ffaca4'); if (this.passives.thorns)
         impact(this, p.x, p.y, 130, 18 * this.passives.thorns, 'nova', 30); if (t.chaosSuit && this.time >= this.chaosSuitAt) {
         this.chaosSuitAt = this.time + 6;
@@ -556,7 +556,7 @@ export class Simulation {
         }
         else
             this.status = 'lost';
-    } }
+    } return true; }
     gainXP(value) { this.xp += value * this.attributes.xp * this.xpBoost; while (this.xp >= xpNeeded(this.level)) {
         this.xp -= xpNeeded(this.level);
         this.level++;
@@ -1192,10 +1192,8 @@ export class Simulation {
                     this.fire(b.x, b.y, a + k * .4, 175 * this.mode.speed, b.damage, true);
             }
             if (enemy) {
-                if (!b.reflected && squaredSegmentDistance(this.player.x, this.player.y, ox, oy, b.x, b.y) < (this.player.r + b.r) ** 2) {
-                    this.hurt(b.damage, 'bullet');
+                if (!b.reflected && squaredSegmentDistance(this.player.x, this.player.y, ox, oy, b.x, b.y) < (this.player.r + b.r) ** 2 && this.hurt(b.damage, 'bullet'))
                     b.life = 0;
-                }
             }
             else if (b.life > 0) {
                 const queryRadius = b.pierce <= 0 || b.kind === 'missile' || b.kind === 'bomb' ? Math.min(100, maximumRadius + b.r + Math.hypot(b.x - ox, b.y - oy) + this.hash.movementSlack) : 100;
@@ -1309,10 +1307,9 @@ export class Simulation {
             if (this.passives.volatile && this.combatRandom() < this.passives.volatile * .05)
                 impact(this, e.x, e.y, 85, 24 * this.passives.volatile, 'bomb');
             if (e.status.mark > 0) {
-                impact(this, e.x, e.y, 95, 35, 'mark');
-                let count = 0;
-                this.hash.query(e.x, e.y, 190, n => { if (n.hp > 0 && count++ < 3)
-                    n.status.mark = 3; });
+                this.hash.query(e.x, e.y, 95, n => { if (n.hp > 0 && Math.hypot(n.x - e.x, n.y - e.y) < 55 + n.r)
+                    this.hit(n, 35, 'mark', false, { x: e.x, y: e.y }); });
+                this.effect('blast', e.x, e.y, 55, ELEMENTS.gravity.color, .5, 0, 0, 0, false, 'mark');
             }
             if (e.prefix === 'volatile')
                 this.hazard('shell', e.x, e.y, { boss: false, r0: 10, r1: 150, warning: .5, duration: .65, damage: e.damage, gaps: [], gapW: 0 });
@@ -1383,7 +1380,7 @@ export class Simulation {
         p.maxHp = s.maxHp;
         p.invul = Math.max(0, p.invul - dt);
         p.flash = Math.max(0, p.flash - dt);
-        p.hp = Math.min(p.maxHp, p.hp + s.regen * dt);
+        p.hp = Math.min(p.maxHp, p.hp + (s.regen + (this.chapter?.regen ?? 0)) * dt);
         p.dashCD = Math.max(0, p.dashCD - dt * this.dashBoost);
         p.dashTime = Math.max(0, p.dashTime - dt);
         this.shake = Math.max(0, this.shake - dt * 16);

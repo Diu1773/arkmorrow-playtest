@@ -1,0 +1,254 @@
+import { completeMetaMigration } from './meta-save.js';
+import { migrateEquipment } from './meta-equipment.js';
+import { emptyRooms } from './base-rooms.js';
+import { awardMetaRun } from './meta-progression.js';
+import { emptyStory, parseStory } from './dialogue/model.js';
+import { crewUnlocked } from './chapters.js';
+import { CREW } from './crew.js';
+import { canFuse, FUSIONS } from './combat-rules.js';
+import { META, PASSIVES, SHIPS, WAVES, WEAPONS } from './data.js';
+import { emptyEquipment, parseEquipment } from './equipment.js';
+import { shardReward, RUN_SKILL_LIMIT } from './economy.js';
+import { AUTO_LIMIT, PASSIVE_LIMIT, SKILL_LIMIT, SKILLS, WEAPON_LEVEL } from './combat-catalog.js';
+export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+export const xpNeeded = (level) => level === 1 ? 72 : Math.round(level > 25 ? 2693 + (level - 25) * 35 : 68 + level * 10 + level * level * 3.8);
+export const hpScale = (seconds) => 1 + Math.max(0, seconds) * .003;
+export const waveAt = (seconds) => WAVES[clamp(Math.floor(seconds / 60), 0, 9)];
+export function rng(seed) { let a = seed | 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+export const SAVE_KEY = 'cosmos-survivor.save.v2';
+export function defaultSave() { return { story: emptyStory(), version: 6, rooms: emptyRooms(), records: {}, milestones: [], lastMetaLoot: null, migrationRefund: 0, crew: 'pip', specialCleared: [], equipment: migrateEquipment(emptyEquipment()).equipment, shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true, telegraphs: 'boss', movement: 'weighted', lessNotices: false }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
+const int = (v, max = 1e9) => typeof v === 'number' && Number.isFinite(v) ? clamp(Math.floor(v), 0, max) : 0;
+const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) ? v : {};
+export function parseSave(raw) {
+    const save = defaultSave();
+    if (!raw)
+        return { save, warning: false, future: false };
+    try {
+        const data = record(JSON.parse(raw));
+        if (typeof data.version === 'number' && data.version > 6)
+            return { save, warning: true, future: true };
+        if (raw.length > 100000)
+            throw Error('size');
+        if (data.version !== 2 && data.version !== 3 && data.version !== 4 && data.version !== 5 && data.version !== 6)
+            throw Error('version');
+        save.shards = int(data.shards);
+        save.runs = int(data.runs);
+        save.wins = Math.min(save.runs, int(data.wins));
+        save.kills = int(data.kills);
+        save.evolutions = int(data.evolutions);
+        save.best = int(data.best, 660);
+        save.unlocked = int(data.unlocked, Number(data.version) >= 5 ? 7 : 5);
+        if (Array.isArray(data.ships))
+            save.ships = SHIPS.filter(s => s.id === 'aster' || data.ships.includes(s.id)).map(s => s.id);
+        if (save.ships.includes(data.ship))
+            save.ship = data.ship;
+        const meta = record(data.meta);
+        for (const item of META)
+            save.meta[item.id] = int(meta[item.id], 5);
+        const settings = record(data.settings);
+        for (const k of ['volume', 'music', 'sfx', 'shake']) {
+            const v = settings[k];
+            if (typeof v === 'number' && Number.isFinite(v))
+                save.settings[k] = clamp(v, 0, 1);
+        }
+        for (const k of ['reduced', 'numbers'])
+            if (typeof settings[k] === 'boolean')
+                save.settings[k] = settings[k];
+        if (settings.telegraphs === 'all' || settings.telegraphs === 'off')
+            save.settings.telegraphs = settings.telegraphs;
+        if (settings.lessNotices === true)
+            save.settings.lessNotices = true;
+        if (settings.movement === 'instant')
+            save.settings.movement = 'instant';
+        if (settings.lang === 'en')
+            save.settings.lang = 'en';
+        if (Array.isArray(data.settled))
+            save.settled = data.settled.filter((v) => typeof v === 'string' && v.length < 100).slice(-100);
+        if (data.version === 3 || data.version === 4 || data.version === 5 || data.version === 6)
+            save.equipment = parseEquipment(data.equipment, data.version === 3 ? 4 : 5);
+        else
+            save.equipment.cleared = Array.from({ length: save.unlocked }, (_, i) => i);
+        if (Number(data.version) < 5) {
+            const progressed = save.runs > 0 || save.unlocked > 0 || save.equipment.cleared.length > 0;
+            save.equipment.cleared = [...new Set([...(progressed ? [0, 1] : []), ...save.equipment.cleared.filter(n => n < 6).map(n => n + 2)])];
+            save.unlocked = progressed ? Math.min(7, save.unlocked + 2) : 0;
+        }
+        if (CREW.some(c => c.id === data.crew) && crewUnlocked(data.crew, save.equipment.cleared))
+            save.crew = data.crew;
+        if (Number(data.version) >= 5 && Array.isArray(data.specialCleared) && data.specialCleared.includes('village'))
+            save.specialCleared = ['village'];
+        save.story = parseStory(data.story);
+        return { save: completeMetaMigration(save, data), warning: false, future: false };
+    }
+    catch {
+        return { save, warning: true, future: false };
+    }
+}
+export const metaCost = (id, level) => META.find(m => m.id === id).cost * (level + 1);
+export function purchase(save, _id) { return save; }
+export function unlockShip(save, id) { const def = SHIPS.find(s => s.id === id); if (!def || save.ships.includes(id) || save.shards < def.cost)
+    return save; return { ...save, shards: save.shards - def.cost, ships: [...save.ships, id] }; }
+export function refund(save) { return save; }
+export const reward = shardReward;
+export function settle(save, result) {
+    if (save.settled.includes(result.id) || !result.id || result.id.length >= 100)
+        return save;
+    const r = { ...result, time: int(result.time, 660), kills: int(result.kills), rewardKills: result.rewardKills === undefined ? undefined : int(result.rewardKills), earned: int(result.earned), evolutions: int(result.evolutions), sector: int(result.sector, 7), bosses: int(result.bosses, 5), difficulty: result.difficulty ?? 'normal' };
+    if (!['easy', 'normal', 'hard'].includes(r.difficulty))
+        return save;
+    let seed = 0;
+    for (const c of r.id)
+        seed = Math.imul(seed, 31) + c.charCodeAt(0) | 0;
+    return awardMetaRun(save, r, rng(seed));
+}
+export function stats(_ship, passives, meta) {
+    const p = (key) => passives[key] ?? 0;
+    return { maxHp: 100 * (1 + p('hull') * .2) + meta.hull * 12, speed: 210 * (1 + p('speed') * .08 + meta.thrust * .04), damage: 1 + p('power') * .12 + meta.output * .06, cooldown: 1 - p('haste') * .07, area: 1 + p('area') * .12, magnet: 100 * (1 + p('magnet') * .3 + meta.magnet * .15), regen: .18 + p('regen') * .4 + meta.repair * .2, armor: p('armor') + meta.guard, xp: 1 + meta.learning * .05, crit: p('crit') * .07, pierce: p('pierce'), multi: Math.ceil(p('multi') / 2), duration: 1 + p('duration') * .18, knockback: p('knockback') * 9 };
+}
+export function weaponStats(slot, s) { const def = WEAPONS.find(w => w.id === slot.id), level = clamp(slot.level, 1, WEAPON_LEVEL), growth = ['chain', 'blade', 'fan', 'orbit'].includes(slot.id) ? .55 : .3; return { damage: def.damage * (1 + growth * (level - 1)) * s.damage * (slot.evolved ? 1.45 : 1), cooldown: Math.max(.12, def.cooldown * s.cooldown / (1 + .08 * (level - 1))), radius: def.radius * s.area * (1 + .04 * (level - 1)), count: 1 + Number(level >= 3) + Number(level >= 5) + s.multi, duration: s.duration, breakpoint: level >= 5 ? 5 : level >= 3 ? 3 : 1 }; }
+export function canEvolve(slot, passives, _time) { const def = WEAPONS.find(w => w.id === slot.id); return !!def && !slot.evolved && slot.level >= WEAPON_LEVEL && (passives[def.passive] ?? 0) >= 1; }
+export function choices(weapons, passives, time, _chest, random, previous = [], banished = [], skills = []) {
+    const result = [...weapons.filter(w => canEvolve(w, passives, time)).map((w) => ({ kind: 'evolve', id: w.id })), ...skills.filter(s => s.level >= 5 && !s.evolved).map((s) => ({ kind: 'skillEvolve', id: s.id })), ...FUSIONS.filter(f => canFuse(f.id, weapons, time, skills)).map((f) => ({ kind: 'fusion', id: f.id }))].slice(0, 3);
+    const pool = [], full = weapons.reduce((n, w) => n + w.level, 0) + skills.reduce((n, s) => n + s.level, 0) + Object.values(passives).reduce((n, lv) => n + (lv ?? 0), 0) >= RUN_SKILL_LIMIT;
+    for (const w of WEAPONS) {
+        const owned = weapons.find(s => s.id === w.id);
+        if (!full && (owned ? owned.level < WEAPON_LEVEL : weapons.length < AUTO_LIMIT))
+            pool.push({ kind: 'weapon', id: w.id });
+    }
+    for (const skill of SKILLS) {
+        const owned = skills.find(s => s.id === skill.id);
+        if (!full && (owned ? owned.level < WEAPON_LEVEL : skills.length < SKILL_LIMIT))
+            pool.push({ kind: 'skill', id: skill.id });
+    }
+    for (const p of PASSIVES) {
+        const owned = passives[p.id] ?? 0;
+        if (!full && (owned ? owned < 6 : Object.keys(passives).length < PASSIVE_LIMIT))
+            pool.push({ kind: 'passive', id: p.id });
+    }
+    for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    pool.sort((a, b) => Number(previous.some(p => p.kind === a.kind && p.id === a.id)) - Number(previous.some(p => p.kind === b.kind && p.id === b.id)));
+    const allowed = pool.filter(item => !banished.some(b => b.kind === item.kind && b.id === item.id));
+    const owned = allowed.find(i => i.kind === 'weapon' ? weapons.some(w => w.id === i.id) : i.kind === 'skill' ? skills.some(s => s.id === i.id) : (passives[i.id] ?? 0) > 0);
+    if (result.length < 3 && owned)
+        result.push(owned);
+    for (const item of allowed)
+        if (result.length < 3 && !result.includes(item))
+            result.push(item);
+    for (const item of [{ kind: 'boost', id: 'damage' }, { kind: 'boost', id: 'hull' }, { kind: 'boost', id: 'reach' }])
+        if (result.length < 3)
+            result.push(item);
+    return result;
+}
+export function moveVector(x, y) { const length = Math.hypot(x, y); return length > 1 ? { x: x / length, y: y / length } : { x, y }; }
+export function deadzone(x, y) { const len = Math.hypot(x, y); if (len < .18)
+    return { x: 0, y: 0 }; const scale = Math.min(1, (len - .18) / .82) / len; return { x: x * scale, y: y * scale }; }
+export class Pool {
+    active = [];
+    free = [];
+    limit;
+    make;
+    constructor(limit, make) { this.limit = limit; this.make = make; }
+    acquire() {
+        if (this.active.length >= this.limit)
+            return null;
+        const item = this.free.pop() ?? this.make();
+        this.active.push(item);
+        return item;
+    }
+    remove(index) {
+        const item = this.active[index];
+        if (!item)
+            return;
+        const last = this.active.pop();
+        if (index < this.active.length)
+            this.active[index] = last;
+        this.free.push(item);
+    }
+}
+export class SpatialHash {
+    size;
+    cells = new Map();
+    buckets = [];
+    positions = new WeakMap();
+    epoch = 0;
+    displacement = 0;
+    constructor(size = 96) { this.size = size; }
+    key(x, y) { return (Math.floor(x / this.size) + 4096) * 8192 + Math.floor(y / this.size) + 4096; }
+    clear() { for (const bucket of this.cells.values()) {
+        bucket.length = 0;
+        this.buckets.push(bucket);
+    } this.cells.clear(); this.epoch++; this.displacement = 0; }
+    insert(item) {
+        let position = this.positions.get(item);
+        if (!position) {
+            position = { x: item.x, y: item.y, epoch: this.epoch };
+            this.positions.set(item, position);
+        }
+        else {
+            position.x = item.x;
+            position.y = item.y;
+            position.epoch = this.epoch;
+        }
+        const key = this.key(item.x, item.y);
+        let bucket = this.cells.get(key);
+        if (!bucket) {
+            bucket = this.buckets.pop() ?? [];
+            this.cells.set(key, bucket);
+        }
+        bucket.push(item);
+    }
+    get movementSlack() { return this.displacement; }
+    moved(item) { const p = this.positions.get(item); if (p?.epoch === this.epoch)
+        this.displacement = Math.max(this.displacement, Math.sqrt((item.x - p.x) ** 2 + (item.y - p.y) ** 2) + 1e-7); }
+    nearest(x, y, radius, eligible = () => true) {
+        const size = this.size, cx = Math.floor(x / size), cy = Math.floor(y / size), a = Math.floor((x - radius) / size), b = Math.floor((x + radius) / size), c = Math.floor((y - radius) / size), d = Math.floor((y + radius) / size);
+        let best = radius * radius, bestKey = Infinity, target;
+        const visit = (i, j) => { if (i < a || i > b || j < c || j > d)
+            return; const key = (i + 4096) * 8192 + j + 4096, bucket = this.cells.get(key); if (!bucket)
+            return; for (const item of bucket) {
+            if (!eligible(item))
+                continue;
+            const distance = (item.x - x) ** 2 + (item.y - y) ** 2;
+            if (distance < best || target !== undefined && distance === best && key < bestKey) {
+                best = distance;
+                bestKey = key;
+                target = item;
+            }
+        } };
+        const limit = Math.max(cx - a, b - cx, cy - c, d - cy);
+        for (let ring = 0; ring <= limit; ring++) {
+            if (!ring)
+                visit(cx, cy);
+            else {
+                for (let i = cx - ring; i <= cx + ring; i++) {
+                    visit(i, cy - ring);
+                    visit(i, cy + ring);
+                }
+                for (let j = cy - ring + 1; j < cy + ring; j++) {
+                    visit(cx - ring, j);
+                    visit(cx + ring, j);
+                }
+            }
+            const outside = Math.min(x - (cx - ring) * size, (cx + ring + 1) * size - x, y - (cy - ring) * size, (cy + ring + 1) * size - y) - this.displacement;
+            if (outside > 0 && outside * outside > best)
+                break;
+        }
+        return target;
+    }
+    query(x, y, radius, visit, stop) {
+        const a = Math.floor((x - radius) / this.size), b = Math.floor((x + radius) / this.size), c = Math.floor((y - radius) / this.size), d = Math.floor((y + radius) / this.size);
+        for (let i = a; i <= b; i++)
+            for (let j = c; j <= d; j++) {
+                const bucket = this.cells.get((i + 4096) * 8192 + j + 4096);
+                if (bucket)
+                    for (const item of bucket) {
+                        visit(item);
+                        if (stop?.())
+                            return;
+                    }
+            }
+    }
+}

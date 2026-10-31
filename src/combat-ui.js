@@ -20,7 +20,8 @@ export function updateCombatControls(s, lang) {
         button.disabled = !slot;
         const name = button.querySelector('b'), time = button.querySelector('small'), fill = button.querySelector('i');
         name.textContent = slot ? (slot.evolved ? skillDef(slot.id).evolution : skillDef(slot.id).name) + ` ${slot.level}/5` : d.empty;
-        time.textContent = slot ? slot.cast > 0 ? `${slot.cast.toFixed(1)}s` : slot.timer > 0 ? `${slot.timer.toFixed(1)}s` : d.ready : 'E';
+        const seconds = lang === 'ko' ? '초' : 's';
+        time.textContent = slot ? slot.cast > 0 ? `${slot.cast.toFixed(1)}${seconds}` : slot.timer > 0 ? `${slot.timer.toFixed(1)}${seconds}` : d.ready : '';
         fill.style.width = slot ? `${Math.min(100, slot.timer / (skillDef(slot.id).cooldown * s.attributes.cooldown) * 100)}%` : '0%';
         button.setAttribute('aria-label', `${name.textContent} ${time.textContent}`);
     }

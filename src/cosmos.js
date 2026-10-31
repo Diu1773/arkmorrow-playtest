@@ -1,4 +1,3 @@
-import {drawRoute} from './route-art.js';
 import {drawSkillFields} from './combat-art.js';
 import {EffectRenderer} from './vfx-art.js';
 const vfx=new EffectRenderer();
@@ -113,7 +112,7 @@ const blastRows=['.......5......./......565....../.......5.......','......555...
 const blastCache=new Map();
 function blast(frame){if(blastCache.has(frame))return blastCache.get(frame);const ca=document.createElement('canvas');ca.width=ca.height=20;const c=ca.getContext('2d'),rows=blastRows[frame].split('/');for(let y=0;y<rows.length;y++)for(let x=0;x<rows[y].length;x++)if(rows[y][x]!=='.'){c.fillStyle={'5':'#e1844b','6':'#ffd878','8':'#fff6d2'}[rows[y][x]];c.fillRect(x+2,y+5,1,1);}blastCache.set(frame,ca);return ca;}
 export function consumeEvents(events){vfx.consume(events);}
-function floaters(G){for(const f of (G.floaters||[]).slice(0,lowQuality?12:24)){if(!visible(f.x,f.y,40))continue;const heavy=Number(f.text)>=75;damage(f.text,f.x,f.y,heavy?'#ffd260':f.color||'#eef2f8',heavy);}
+function floaters(G){for(const f of (G.floaters||[]).slice(0,lowQuality?12:24)){if(!visible(f.x,f.y,40))continue;const heavy=Number(f.text)>=75;damage(f.reaction===undefined?f.text:combatCopy(lang).reactionNames[f.reaction],f.x,f.y,heavy?'#ffd260':f.color||'#eef2f8',heavy);}
 }
 function darkness(G){const p=G.player;if(!p?.inDark&&!G.blackout)return;const cx=X(p.x),cy=Y(p.y),r=(G.blackout>0?200:230)*unit;for(let y=0;y<ch;y+=4)for(let x=0;x<cw;x+=4){const d=Math.hypot(x-cx,y-cy);if(d>r*1.9)rect(x,y,4,4,'#090c14');else if(d>r*.6&&bayer[((y/4)%4)*4+(x/4)%4]/16<(d/r-.6)/1.3)rect(x,y,4,4,'#090c14');}}
 let miniFrame=0;
@@ -153,12 +152,14 @@ function enemyBullet(b){pixelStamp('bullet'+(Math.floor(v.time*8+(b.age||0)*2)%2
 function player(G,p,settings){
  const a=G.aimAngle??p.angle,d=Math.abs(Math.cos(a))>Math.abs(Math.sin(a))?(Math.cos(a)>0?3:1):(Math.sin(a)>0?0:2),frame=Math.hypot(p.vx,p.vy)>20?Math.floor(v.time*8)%4:0,img=groundCrew(G.crew||'pip',d,frame,p.flash>0),x=X(p.x),y=Y(p.y),firing=G.muzzleTime>0,back=Math.sin(a)<-.35;
  if(!settings.reduced)for(const ghost of G.dashGhosts||[]){ctx.globalAlpha=Math.max(0,ghost.life)*1.4;ctx.drawImage(img,X(ghost.x)-18,Y(ghost.y)-30);}ctx.globalAlpha=1;
+ ctx.globalAlpha=p.invul>0?(settings.reduced?.6:Math.floor(v.time*16)%2===0?.3:1):1;
  if(G.chapter?.kind!=='ground'){const flicker=settings.reduced?0:Math.floor(v.time*12)%3;rect(x-11,y-10,5,10,'#657182');rect(x+7,y-10,5,10,'#657182');rect(x-10,y,3,5+flicker*2,'#f0a33a');rect(x+8,y,3,5+flicker*2,'#79d8f2');}
  const gun=weaponFrame(G.crew||'pip',a,firing),recoil=firing?2:0;
  const drawGun=()=>ctx.drawImage(gun,x-17-Math.round(Math.cos(a)*recoil),y-31-Math.round(Math.sin(a)*recoil));
  if(back)drawGun();ctx.drawImage(img,x-18,y-30);if(!back)drawGun();
  if(p.invul>0)arc(p.x,p.y,p.r*1.6,0,TAU,'#aacbd0',2,true);
  line(x-5,y+2,x+5,y+2,'#090d18',3);line(x-4,y+2,x+4,y+2,'#78e1df',1);
+ ctx.globalAlpha=1;
 }
 let overlapCanvas;
 function overlapRim(G,p,img,x,y){
@@ -181,7 +182,6 @@ function arrivals(G){
 }
 export function render(G,V,settings={}){setup();if(!ctx||ctx.lost)return;if(canvas.width!==Math.ceil(V.w/Math.max(1,Math.round((V.w<V.h?Math.min(V.w/195,V.h/422):V.h/360))))||canvas.height!==Math.ceil(V.h/Math.max(1,Math.round((V.w<V.h?Math.min(V.w/195,V.h/422):V.h/360)))))resize(V.w,V.h);v={...V,reduced:settings.reduced};const entrance=G?.bossRecords?.at(-1),intro=entrance?G.time-entrance.spawned:10;if(intro>=0&&intro<1.2&&!settings.reduced)v.scale*=1+.06*Math.sin(intro/1.2*Math.PI);lowQuality=settings.quality==='low';lang=settings.lang||'ko';unit=v.scale/zoom;vfx.bind(G,{X,Y,unit,w:cw,h:ch,time:v.time,low:lowQuality,reduced:!!settings.reduced,large:settings.largeProjectiles!==false});const shake=settings.reduced?0:Math.min((v.shake||0)+vfx.feedback(),8);v.camX-=Math.round(shake*Math.sin(v.time*61)/zoom)/unit;v.camY-=Math.round(shake*Math.cos(v.time*49)/zoom)/unit;ctx.setTransform(1,0,0,1,0,0);ctx.imageSmoothingEnabled=false;ctx.globalAlpha=1;background(G);lastTime=v.time;if(!G){ctx.flush?.();return;}if(G.launchAge>=0){if(ctx.backend==='WebGL'){launchCanvas??=document.createElement('canvas');if(launchCanvas.width!==cw||launchCanvas.height!==ch){launchCanvas.width=cw;launchCanvas.height=ch;}launchCanvas.pixelDynamic=true;const c=launchCanvas.getContext('2d');c.clearRect(0,0,cw,ch);drawLaunch(c,G,cw,ch,lowQuality,settings.reduced);ctx.drawImage(launchCanvas,0,0);ctx.flush();}else drawLaunch(ctx,G,cw,ch,lowQuality,settings.reduced);return;}
  if(G.expedition&&['launch','atmosphere','village'].includes(G.chapter?.id))drawProps(ctx,G,X,Y,unit,v.time);else {terrain(G);for(const o of G.obstacles||[])stamp(o.kind||'debris',o.x,o.y,o.r*3.2,o.angle||0);}
- if(G.objects&&G.doors)drawRoute(ctx,G,X,Y,unit);
  wline(18,18,4782,18,'#637386',3,true);wline(18,18,18,3182,'#637386',3,true);wline(4782,18,4782,3182,'#637386',3,true);wline(18,3182,4782,3182,'#637386',3,true);
  arrivals(G);paintBossArena(ctx,G,X,Y,unit);
  const crowded=(G.enemies?.length||0)>220||(G.shots?.length||0)+(G.effects?.length||0)>160;fxPressure=(G.enemies?.length||0)>700?2:crowded?1:0;

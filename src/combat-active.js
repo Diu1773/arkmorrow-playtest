@@ -1,5 +1,5 @@
 import { DASH, SKILLS, skillDef, skillStats } from './combat-catalog.js';
-import { impact } from './battle.js';
+import { impact, gravityMultiplier } from './battle.js';
 import { arenaPoint, constrainArena } from './boss-director.js';
 const distance = (x, y, ax, ay, bx, by) => {
     const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
@@ -41,13 +41,20 @@ function releaseSkill(sim, slot) {
         for (const e of sim.enemies)
             if (e.hp > 0 && distance(e.x, e.y, start.x, start.y, p.x, p.y) < w.radius + e.r) {
                 sim.hit(e, damage, def.weapon);
-                e.status.mark = 3;
+                e.status.mark = 0;
                 e.status.stun = Math.max(e.status.stun, slot.id === 'flash' ? 1.5 : .25);
             }
-        if (slot.evolved)
-            impact(sim, p.x, p.y, w.radius * 1.5, damage * .65, def.weapon, 25);
-        if (slot.fusion === 'thunderhead')
-            sim.effect('ground', p.x, p.y, 180, SKILLS[7].color, 2, damage * .12, 0, 0, false, 'tether');
+        if (slot.evolved) {
+            impact(sim, p.x, p.y, w.radius * (slot.id === 'flash' ? .8 : 1.5), damage * .65, def.weapon, 25);
+            for (const e of sim.enemies)
+                if (Math.hypot(e.x - p.x, e.y - p.y) < w.radius + e.r)
+                    e.status.mark = 0;
+        }
+        if (slot.fusion === 'thunderhead') {
+            const field = sim.effect('ground', p.x, p.y, 180, SKILLS[7].color, 2, damage * .12, 0, 0, false, 'tether');
+            if (field)
+                field.normalScale = .02;
+        }
         sim.effect('line', start.x, start.y, 0, def.color, .3, 0, p.x, p.y, false, def.weapon);
         return;
     }
@@ -151,13 +158,24 @@ export function updateSkills(sim, dt, input) {
                 if (f.slot.evolved)
                     p.hp = Math.min(p.maxHp, p.hp + p.maxHp * .008);
             }
+            else if (f.id === 'void')
+                gravityHit(sim, f, false);
             else if (f.id !== 'reflect')
                 sim.areaDamage(f.x, f.y, f.radius, f.damage, 0, def.weapon);
-            if (f.slot.fusion === 'supernova')
-                impact(sim, f.x, f.y, f.radius * .65, f.damage * .5, 'missile');
+            if (f.slot.fusion === 'supernova') {
+                for (const e of sim.enemies)
+                    if (e.hp > 0 && Math.hypot(e.x - f.x, e.y - f.y) < f.radius * .65 + e.r)
+                        sim.hit(e, f.damage * (e.type === 'boss' || e.elite ? .5 : .003), 'missile', true, { x: f.x, y: f.y });
+                impact(sim, f.x, f.y, f.radius * .65, 0, 'missile');
+            }
         }
         if (f.ttl <= 0) {
-            impact(sim, f.x, f.y, f.radius, f.damage * (f.id === 'void' ? 8 : f.id === 'reflect' ? 3 : 1), def.weapon, 25);
+            if (f.id === 'void') {
+                gravityHit(sim, f, true);
+                impact(sim, f.x, f.y, f.radius, 0, def.weapon, 25);
+            }
+            else if (f.id !== 'drone')
+                impact(sim, f.x, f.y, f.radius, f.damage * (f.id === 'reflect' ? 3 : 1), def.weapon, 25);
             if (f.slot.evolved && f.id === 'void')
                 p.invul = Math.max(p.invul, .5);
             if (f.slot.fusion === 'reactor')
@@ -165,6 +183,12 @@ export function updateSkills(sim, dt, input) {
             sim.combatFields.splice(i, 1);
         }
     }
+}
+function gravityHit(sim, f, final) {
+    for (const e of sim.enemies)
+        if (e.hp > 0 && Math.hypot(e.x - f.x, e.y - f.y) < f.radius + e.r) {
+            sim.hit(e, f.damage * gravityMultiplier(e, final), 'blackhole', true, { x: f.x, y: f.y });
+        }
 }
 export function castMovement(sim) { return sim.skills.some(s => s.cast > 0) ? .5 : 1; }
 export function startDash(sim, x, y) {

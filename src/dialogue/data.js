@@ -11,7 +11,3 @@ export const dialogues = [
     { id: 'tape-break', at: 'bolt', priority: 5, once: false, condition: {}, lines: [{ speaker: 'bolt', expression: 'normal', ko: '고장 난 데 있으면 말해.\n없어도 말해. 그게 더 수상하니까.', en: 'Tell me if anything breaks.\nTell me if nothing breaks, too. That is suspicious.' }] },
 ];
 export const deckDetails = [{ cups: 2, collar: '#71d6ce', graffiti: 'HOME?', code: 'ANCHOR / 01 / HOLD' }, { cups: 3, collar: '#e2a65a', graffiti: 'HOME.', code: 'ANCHOR / 02 / HOLD' }, { cups: 1, collar: '#cba0e7', graffiti: 'HOME!', code: 'ANCHOR / 03 / HOLD' }];
-export const routeRecords = [
-    { id: 'route-hangar', at: 'window', priority: 0, once: true, condition: {}, lines: [{ speaker: 'bolt', expression: 'quiet', ko: '출격 시각과 귀빈 격납고 폐쇄 시각이 같다.\n…우리한테는 문 열어 준다더니.', en: 'Launch and VIP hangar lockdown have the same time.\nThey said they would keep a door open for us.' }] },
-    { id: 'route-wiring', at: 'capsule', priority: 0, once: true, condition: {}, lines: [{ speaker: 'mori', expression: 'quiet', ko: '귀환 장치 점검표. 내 설계에는 없던 배선이다.\n변경 승인란은 비어 있다.', en: 'Return device inspection. Wiring absent from my design.\nThe approval field is blank.' }] },
-];

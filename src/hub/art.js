@@ -2,6 +2,7 @@ import { crewSprite } from '../crew.js';
 import { crewUnlocked } from '../chapters.js';
 import { DECK, places, crewSpots } from './model.js';
 import { deckDetails, speakers } from '../dialogue/data.js';
+import { optionArt } from './options-art.js';
 const letters = { A: ['01110', '11011', '11011', '11111', '11011', '11011', '11011'], R: ['11110', '11011', '11011', '11110', '11100', '11010', '11011'], K: ['11011', '11010', '11100', '11100', '11110', '11011', '11011'], M: ['11011', '11111', '11111', '11011', '11011', '11011', '11011'], O: ['01110', '11011', '11011', '11011', '11011', '11011', '01110'], W: ['11011', '11011', '11011', '11011', '11111', '11111', '01010'] };
 export function drawLogo(c, x, y, scale) {
     const word = 'ARKMORROW';
@@ -61,9 +62,17 @@ export function deckCamera(canvas, deck) {
     const bounds = canvas.getBoundingClientRect(), width = bounds.width || window.innerWidth, height = bounds.height || window.innerHeight - 150, scale = width < 600 ? 2 : Math.max(1, Math.floor(Math.min(width / 320, height / 240))), w = Math.ceil(width / scale), h = Math.ceil(height / scale);
     canvas.width = w;
     canvas.height = h;
+    if (deck.layout) {
+        const l = deck.layout;
+        return { x: Math.round(w >= l.w ? (l.w - w) / 2 : Math.max(0, Math.min(l.w - w, deck.x - w / 2))), y: Math.round(h >= l.h ? (l.h - h) / 2 : Math.max(0, Math.min(l.h - h, deck.y - h / 2))), w, h, scale };
+    }
     return { x: Math.round(Math.max(0, Math.min(DECK.w - w, deck.x - w / 2))), y: Math.round(Math.max(0, Math.min(DECK.h - h, deck.y - h / 2))), w, h, scale };
 }
-export function deckArt(canvas, deck, cleared, returns, time, lang, camera) {
+export function deckArt(canvas, deck, cleared, returns, time, lang, camera, rooms) {
+    if (deck.layout && rooms) {
+        optionArt(canvas, deck, cleared, returns, time, lang, camera, rooms);
+        return;
+    }
     const c = canvas.getContext('2d'), detail = deckDetails[returns % deckDetails.length];
     c.imageSmoothingEnabled = false;
     rect(c, 0, 0, canvas.width, canvas.height, '#0c1422');

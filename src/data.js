@@ -32,7 +32,7 @@ const tuning = {
 };
 export const WEAPONS = LEGACY_WEAPONS.filter(w => tuning[w.id]).map(w => {
     const [damage, cooldown, passive] = tuning[w.id];
-    return { ...w, damage, cooldown, passive };
+    return { ...w, damage, cooldown, passive, radius: w.id === 'frost' ? 140 : w.id === 'resonance' ? 125 : w.radius };
 });
 export const weaponTextIndex = (id) => LEGACY_WEAPONS.findIndex(w => w.id === id);
 export const PASSIVES = [
@@ -87,9 +87,9 @@ export const ENEMY_BEHAVIOR = { slime: 'split', invader: 'dodge', guard: 'shield
 export const CHAPTER_ENEMIES = [['dodger', 'charger', 'bomber', 'healer'], ['charger', 'sniper', 'blinker', 'summoner'], ['burrower', 'healer', 'bomber', 'dodger'], ['sniper', 'charger', 'summoner', 'burrower'], ['blinker', 'dodger', 'healer', 'summoner'], ['burrower', 'blinker', 'sniper', 'bomber']];
 export const ELITES = ['swift', 'armored', 'mending', 'volatile', 'echo'];
 export const MODES = {
-    easy: { hp: .75, damage: .55, speed: .85, spawn: .8, tell: 1.4, iframes: 1 },
-    normal: { hp: 1, damage: .8, speed: 1, spawn: 1, tell: 1.15, iframes: .85 },
-    hard: { hp: 1.3, damage: 1.2, speed: 1.1, spawn: 1.3, tell: 1, iframes: .65 }
+    easy: { hp: .75, damage: .55, speed: .85, spawn: .8, tell: 1.4, iframes: .5 },
+    normal: { hp: 1, damage: .8, speed: 1, spawn: 1, tell: 1.15, iframes: .4 },
+    hard: { hp: 1.3, damage: 1.2, speed: 1.1, spawn: 1.3, tell: 1, iframes: .3 }
 };
 export const WAVES = [1.3, 1.9, 2.7, 3.8, 5, 6, 7.2, 8.4, 9.4, 3.5];
 export const CAPTAINS = [['fan', 'ring', 'laser', 'charge'], ['squad', 'wall', 'fan'], ['laser', 'barSweep', 'ring'], ['closing', 'wall', 'balloon']];

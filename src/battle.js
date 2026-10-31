@@ -5,6 +5,7 @@ import { REACTIONS, reactionFor } from './combat-rules.js';
 import { combatCopy } from './i18n.js';
 const weaponElements = Object.fromEntries(LEGACY_WEAPONS.map(w => [w.id, w.element ?? 'physical']));
 export const elementOf = (weapon) => weaponElements[weapon] ?? 'physical';
+export const gravityMultiplier = (e, final) => e.type === 'boss' ? (final ? 8 : 1) : e.elite ? (final ? 4 : .5) : final ? .06 : .01;
 export function impact(sim, x, y, r, damage, weapon, push = 0) {
     sim.areaDamage(x, y, r, damage, push, weapon);
     sim.effect('blast', x, y, r, ELEMENTS[elementOf(weapon)].color, .55, 0, 0, 0, false, weapon);
@@ -27,14 +28,16 @@ export function statusHit(sim, e, damage, weapon) {
                 sim.floaters.splice(numeric, 1);
         }
         if (sim.floaters.length < 24)
-            sim.floaters.push({ x: e.x, y: e.y - e.r - 18, life: .9, text: combatCopy('en').reactionNames[index], color });
+            sim.floaters.push({ x: e.x, y: e.y - e.r - 18, life: .9, text: combatCopy('ko').reactionNames[index], reaction: index, color });
         sim.effect(reaction === 'arc' ? 'line' : reaction === 'shatter' ? 'shatter' : reaction === 'collapse' ? 'gravity' : 'blast', e.x, e.y, 95, color, .5, 0, e.x + 50, e.y - 40, false, weapon);
         sim.burst(e.x, e.y, color, 12, 3);
         sim.emit('reaction', e.x, e.y, index, color, weapon);
         const multiplier = reaction === 'collapse' ? 1.3 : reaction === 'shatter' ? 1.1 : .65;
+        let collateral = 0;
         sim.hash.query(e.x, e.y, 160, n => { if (n.hp <= 0 || n.hidden || Math.hypot(n.x - e.x, n.y - e.y) > 150)
             return; if (reaction === 'arc' && n !== e && n.status.shock <= 0)
-            return; sim.hit(n, damage * multiplier, weapon, false); if (reaction === 'arc' && n !== e)
+            return; if (n !== e && n.type !== 'boss' && collateral++ >= 6)
+            return; n.status.reactionCD = Math.max(n.status.reactionCD, .7); sim.hit(n, damage * multiplier * (n === e || n.type === 'boss' ? 1 : .35), weapon, false); if (reaction === 'arc' && n !== e)
             sim.effect('line', e.x, e.y, 0, color, .18, 0, n.x, n.y, false, 'chain'); });
         if (reaction === 'shatter' || reaction === 'steam')
             s.freeze = 0;
@@ -198,7 +201,7 @@ export function updateBattleEffects(sim, dt) {
                         n.y += (e.y - n.y) / (d || 1) * pull;
                         n.status.pull = 1;
                     }
-                    sim.hit(n, e.damage * (e.kind === 'gravity' ? .8 : 1), e.weapon);
+                    sim.hit(n, e.damage * (e.kind === 'gravity' ? gravityMultiplier(n, false) : 1) * (n.type === 'boss' || n.elite ? 1 : e.normalScale ?? 1), e.weapon);
                     if (e.kind === 'wave' || e.kind === 'ripple') {
                         n.x += (n.x - e.x) / (d || 1) * 24;
                         n.y += (n.y - e.y) / (d || 1) * 24;
@@ -215,8 +218,12 @@ export function updateBattleEffects(sim, dt) {
                 sim.burst(e.x, e.y, e.color, 3, 1, e.kind === 'gravity');
         }
         if (e.ttl <= 0) {
-            if (e.kind === 'gravity' && !e.skillVisual)
-                impact(sim, e.x, e.y, e.radius, e.damage * 2, 'blackhole');
+            if (e.kind === 'gravity' && !e.skillVisual) {
+                for (const n of sim.enemies)
+                    if (n.hp > 0 && Math.hypot(n.x - e.x, n.y - e.y) < e.radius + n.r)
+                        sim.hit(n, e.damage * gravityMultiplier(n, true), 'blackhole', true, { x: e.x, y: e.y });
+                impact(sim, e.x, e.y, e.radius, 0, 'blackhole');
+            }
             if (e.kind === 'splitwarn') {
                 sim.spawn('mini', e.x - 18, e.y, '', false, e.repeat);
                 sim.spawn('mini', e.x + 18, e.y, '', false, e.repeat);

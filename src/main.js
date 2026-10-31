@@ -1,6 +1,3 @@
-import { RouteSimulation, ROUTE_KEY, readRouteArchive, saveRouteRecord } from './route.js';
-import { routeEntry, routeHUD, routeResult, routeAimSetting, routeArchiveUI, drawRouteIcons } from './route-ui.js';
-import { pilotInput, resolvePilotChoices } from './route-pilot.js';
 import { MetaScreen, chapterUI, roomsUI, metaRewardUI, starMarks } from './meta-ui.js';
 import { metaCopy } from './meta-copy.js';
 import { difficultyOpen, DIFFICULTY_REWARDS } from './meta-progression.js';
@@ -48,7 +45,6 @@ catch {
 }
 const parsed = parseSave(storageRaw);
 let save = parsed.save, view = 'intro', sim = null, selectedSector = 0, difficulty = 'normal', offers = [], chest = false, banishing = false, returnView = 'title', shopReturn = 'title', preview = false;
-let routeReturnSave = null;
 let practice = null, introAt = performance.now();
 const keys = new Set(), pointer = { down: false, aim: false, x: 0, y: 0 }, joy = { x: 0, y: 0, id: -1, originX: 0, originY: 0 }, audio = new AudioEngine(save.settings);
 let lastSkill = null;
@@ -121,7 +117,7 @@ function toast(message) { if (view === 'playing') {
     el.setAttribute('aria-live', 'polite');
     document.body.append(el);
 } el.textContent = message; el.hidden = false; el.className = 'show'; toastUntil = performance.now() + 3600; }
-function persist() { if (sim instanceof RouteSimulation || preview || parsed.future || storageReadFailed)
+function persist() { if (preview || parsed.future || storageReadFailed)
     return; try {
     localStorage.setItem(SAVE_KEY, serializeSave(save));
 }
@@ -131,7 +127,7 @@ catch {
 function resetInput() { frameStats.break(); const stick = document.getElementById('joystick'); stick?.classList.remove('active'); stick?.removeAttribute('style'); keys.clear(); pointer.down = pointer.aim = false; joy.x = joy.y = 0; joy.id = -1; dashPressed = false; skillPressed = [false, false]; acc = 0; }
 function focusFirst() { (app.querySelector('.meta-sheet button:not(:disabled),.meta-sheet select') ?? app.querySelector('[data-autofocus]:not(:disabled)') ?? app.querySelector('button:not(:disabled),select,input'))?.focus({ preventScroll: true }); }
 function visibleEnemies() { return sim?.enemies.reduce((n, e) => n + Number(e.hp > 0 && !e.hidden && Math.abs(e.x - V.camX) < V.w / V.scale / 2 + e.r && Math.abs(e.y - V.camY) < V.h / V.scale / 2 + e.r), 0) ?? 0; }
-function setView(next) { document.getElementById('toast')?.setAttribute('hidden', ''); toastUntil = 0; app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(sim instanceof RouteSimulation ? 'pause' : view === 'intro' || view === 'title' || view === 'practice' ? 'title' : view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim && !(sim instanceof RouteSimulation))
+function setView(next) { document.getElementById('toast')?.setAttribute('hidden', ''); toastUntil = 0; app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(view === 'intro' || view === 'title' || view === 'practice' ? 'title' : view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim)
     audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id); drawUI(); }
 function drawIcons() {
     for (const ca of app.querySelectorAll('[data-crew]')) {
@@ -143,9 +139,9 @@ function drawIcons() {
     drawCombatIcons(app);
     drawGearIcons(app, [...save.equipment.items, ...(save.equipment.lastLoot?.items ?? []), ...(metaScreen.plan?.steps.flatMap(s => [s.before, s.after]) ?? [])]);
 }
-function launchUI() { const ko = save.settings.lang === 'ko', ch = chapterDef(special ? 'village' : selectedSector), ready = `<div class="launch-ready"><div><h3>${special ? (ko ? '시골 마을' : 'Country Village') : ch[save.settings.lang]}</h3><p>${CREW.find(c => c.id === save.crew).name} / ${ko ? '전투력' : 'Power'} ${combatPower(save)} / ${ko ? '권장' : 'Recommended'} ${ch.recommended}</p></div><div class="launch-panel"><select id="difficulty" aria-label="${tr('difficulty')}">${['easy', 'normal', 'hard'].map(k => `<option value="${k}" ${difficulty === k ? 'selected' : ''} ${difficultyOpen(save, special ? 'village' : String(selectedSector), k) ? '' : 'disabled'}>${tr(k)} &#215;${DIFFICULTY_REWARDS[k].toFixed(1)}</option>`).join('')}</select>${btn('start', tr('launch'), 'primary launch', 'data-autofocus')}</div></div>`; return chapterUI(save, selectedSector, ready) + routeEntry(ko) + `<div class="button-row">${btn('special', ko ? '\uC2A4\uD398\uC15C \uD0D0\uC0AC' : 'Special expeditions')}</div>`; }
+function launchUI() { const ko = save.settings.lang === 'ko', ch = chapterDef(special ? 'village' : selectedSector), ready = `<div class="launch-ready"><div><h3>${special ? (ko ? '시골 마을' : 'Country Village') : ch[save.settings.lang]}</h3><p>${CREW.find(c => c.id === save.crew).name} / ${ko ? '전투력' : 'Power'} ${combatPower(save)} / ${ko ? '권장' : 'Recommended'} ${ch.recommended}</p></div><div class="launch-panel"><select id="difficulty" aria-label="${tr('difficulty')}">${['easy', 'normal', 'hard'].map(k => `<option value="${k}" ${difficulty === k ? 'selected' : ''} ${difficultyOpen(save, special ? 'village' : String(selectedSector), k) ? '' : 'disabled'}>${tr(k)} &#215;${DIFFICULTY_REWARDS[k].toFixed(1)}</option>`).join('')}</select>${btn('start', tr('launch'), 'primary launch', 'data-autofocus')}</div></div>`; return chapterUI(save, selectedSector, ready) + `<div class="button-row">${btn('special', ko ? '\uC2A4\uD398\uC15C \uD0D0\uC0AC' : 'Special expeditions')}</div>`; }
 function specialUI() { const ko = save.settings.lang === 'ko', open = save.equipment.cleared.includes(1); return heading(ko ? '스페셜' : 'Special') + `<div class="special-landscape"><p class="meta-stars ${save.records.village?.clears.hard ? 'gold-record' : ''}">${starMarks(save.records.village?.stars ?? 0)}</p><h3>${ko ? '시골 마을' : 'Country Village'}</h3><p>${ko ? '들판에 떨어진 운석. 허수아비가 먼저 움직였다.' : 'A meteor landed. The scarecrow moved first.'}</p><p>${open ? (ko ? '본편과 별도 탐사 / HARVEST 배낭' : 'Separate expedition / HARVEST Pack') : (ko ? '본편 챕터 2 대기권 클리어 후 열림' : 'Clear story chapter 2 to unlock')}</p>${btn('special-pick', ko ? '시골 마을로' : 'Visit village', 'primary', open ? '' : 'disabled')}</div>`; }
-function hudUI() { return `<section id="hud" aria-label="${tr('hp')}"><div class="mission-box panel"><h2 id="hud-sector"></h2></div><div class="run-progress" role="progressbar" aria-label="${save.settings.lang === 'ko' ? '챕터 진행' : 'Chapter progress'}" aria-valuemin="0" aria-valuemax="100"><i id="run-fill"></i>${((sim instanceof RouteSimulation ? [] : sim?.encounters) ?? CHAPTER_BOSSES).map((b, i) => `<span class="boss-marker ${b.role === 'final' ? 'final' : ''}" style="left:${b.at / (sim?.duration ?? CHAPTER_SECONDS) * 100}%" title="${clock(b.at)}" aria-label="${clock(b.at)} ${b.role === 'final' ? tr('boss') : tr('middle')}" data-at="${b.at}" data-boss="${i}">${b.role === 'final' ? '◆' : '◇'}</span>`).join('')}<b id="run-percent"></b></div><div class="hud-actions">${btn('pause', '&#8545;', 'icon-btn', `aria-label="${tr('pause')}"`)}${btn('fullscreen', tr('fullscreen'), 'small')}</div><div id="upgrade-chips"></div><div class="minimap-wrap panel"><div><span>${tr('minimap')}</span><span id="map-time"></span></div><canvas id="minimap" width="90" height="60" aria-label="${tr('minimap')}"></canvas></div><div id="bossbar" class="panel" hidden><div><b id="boss-name"></b><span id="boss-phase"></span></div><div class="meter"><i id="boss-fill"></i></div></div><div id="incoming" role="status" aria-live="polite" hidden><span id="incoming-kind"></span><b id="incoming-count"></b></div><div id="danger-label" hidden>${tr('warning')}</div><div id="objective-label"></div><div class="status-box panel" id="status-box"><div class="lv-badge"><small>${tr('level')}</small><b id="hud-level"></b></div><div class="bars"><div class="bar-row"><span>${tr('hp')}</span><div class="meter hp"><i id="hp-fill"></i><em id="hud-hp"></em></div></div><div class="bar-row"><span>${tr('xp')}</span><div class="meter xp"><i id="xp-fill"></i><em id="hud-xp"></em></div></div></div><div class="ship-tag"><b id="hud-ship"></b><span id="hud-time"></span></div></div><div id="joystick" role="group" aria-label="${tr('move')}"><div id="stick"></div><span>${tr('move')}</span></div><button id="dash-btn" aria-label="${tr('dash')}"><b>&#8599;</b><span id="dash-text">${tr('dash')}</span></button>${combatControls(save.settings.lang, sim?.autoCast ?? autoCast)}<span id="perf" hidden></span></section>`; }
+function hudUI() { return `<section id="hud" aria-label="${tr('hp')}"><div class="mission-box panel"><h2 id="hud-sector"></h2></div><div class="run-progress" role="progressbar" aria-label="${save.settings.lang === 'ko' ? '챕터 진행' : 'Chapter progress'}" aria-valuemin="0" aria-valuemax="100"><i id="run-fill"></i>${(sim?.encounters ?? CHAPTER_BOSSES).map((b, i) => `<span class="boss-marker ${b.role === 'final' ? 'final' : ''}" style="left:${b.at / (sim?.duration ?? CHAPTER_SECONDS) * 100}%" title="${clock(b.at)}" aria-label="${clock(b.at)} ${b.role === 'final' ? tr('boss') : tr('middle')}" data-at="${b.at}" data-boss="${i}">${b.role === 'final' ? '◆' : '◇'}</span>`).join('')}<b id="run-percent"></b></div><div class="hud-actions">${btn('pause', '&#8545;', 'icon-btn', `aria-label="${tr('pause')}"`)}${btn('fullscreen', tr('fullscreen'), 'small')}</div><div id="upgrade-chips"></div><div class="minimap-wrap panel"><div><span>${tr('minimap')}</span><span id="map-time"></span></div><canvas id="minimap" width="90" height="60" aria-label="${tr('minimap')}"></canvas></div><div id="bossbar" class="panel" hidden><div><b id="boss-name"></b><span id="boss-phase"></span></div><div class="meter"><i id="boss-fill"></i></div></div><div id="incoming" role="status" aria-live="polite" hidden><span id="incoming-kind"></span><b id="incoming-count"></b></div><div id="danger-label" hidden>${tr('warning')}</div><div id="objective-label"></div><div class="status-box panel" id="status-box"><div class="lv-badge"><small>${tr('level')}</small><b id="hud-level"></b></div><div class="bars"><div class="bar-row"><span>${tr('hp')}</span><div class="meter hp"><i id="hp-fill"></i><em id="hud-hp"></em></div></div><div class="bar-row"><span>${tr('xp')}</span><div class="meter xp"><i id="xp-fill"></i><em id="hud-xp"></em></div></div></div><div class="ship-tag"><b id="hud-ship"></b><span id="hud-time"></span></div></div><div id="joystick" role="group" aria-label="${tr('move')}"><div id="stick"></div><span>${tr('move')}</span></div><button id="dash-btn" aria-label="${tr('dash')}"><b>&#8599;</b><span id="dash-text">${tr('dash')}</span></button>${combatControls(save.settings.lang, sim?.autoCast ?? autoCast)}<span id="perf" hidden></span></section>`; }
 function choiceText(c) { const d = dict(); if (c.kind === 'chaos')
     return { name: 'CHAOS', desc: combatCopy(save.settings.lang).chaos[Number(c.id)], rank: 0, new: false, kind: 'CHAOS', icon: icon('chest') }; if (c.kind === 'fusion') {
     const f = FUSIONS.find(f => f.id === c.id);
@@ -198,10 +194,9 @@ function choiceChange(c) {
     return { rank: '', gain: '' };
 }
 function choiceUI() { return heading(chest ? rankCopy[sim.chestRank][save.settings.lang] + ' ' + tr('chest') + ' / ' + combatCopy(save.settings.lang).remaining + ' ' + (sim.chestQueue[0]?.remaining ?? 1) : tr('levelup'), banishing ? tr('banishHint') : tr('pick'), false) + `<div class="upgrade-grid">${offers.map((c, i) => { const x = choiceText(c), change = choiceChange(c); return `<button class="upgrade-card ${c.kind === 'evolve' || c.kind === 'fusion' || c.kind === 'chaos' ? 'evolve-card' : c.kind === 'passive' ? 'passive-card' : 'weapon-card'}" data-act="choose" data-id="${i}" style="--order:${i}" ${banishing && !['weapon', 'skill', 'passive'].includes(c.kind) ? 'disabled' : ''}><div class="card-cap"><span>${x.kind}</span><kbd>${i + 1}</kbd></div><div class="item-portrait">${x.icon}${x.new ? '<b class="new-tag">NEW</b>' : ''}</div><h3>${x.name}</h3>${x.rank ? pips(x.rank, c.kind === 'passive' ? 6 : 5) : ''}<p class="card-level">${change.rank}</p><p>${x.desc}</p><p class="upgrade-gain">${change.gain}</p>${choiceDetails(sim, c, save.settings.lang)}</button>`; }).join('')}</div><div class="button-row">${btn('reroll', tr('reroll') + ` (${sim.rerolls})`, '', sim.rerolls <= 0 ? 'disabled' : '')}${btn('skip-cue', tr('skipCue'), 'quiet')}${btn('banish', tr(banishing ? 'cancel' : 'banish') + ` (${sim.banishes})`, 'quiet', sim.banishes <= 0 ? 'disabled' : '')}</div>`; }
-function settingsUI() { return heading(tr('settings')) + (sim instanceof RouteSimulation ? routeAimSetting(sim, save.settings.lang === 'ko') : '') + `${DEV || PLAYTEST ? `<p class="test-build">${equipmentCopy(save.settings.lang).testBuild}</p>${btn('test-currency', equipmentCopy(save.settings.lang).test)}` : ''}` + `<div class="settings-list"><label class="setting-row"><span>${save.settings.lang === 'ko' ? '알림 줄이기' : 'Fewer notifications'}</span><input type="checkbox" data-setting="lessNotices" ${save.settings.lessNotices ? 'checked' : ''}></label><label class="setting-row"><span>${save.settings.lang === 'ko' ? '움직임' : 'Movement'}</span><select data-setting="movement"><option value="weighted" ${save.settings.movement === 'weighted' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '무게감 (기본)' : 'Weighted (default)'}</option><option value="instant" ${save.settings.movement === 'instant' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '즉시' : 'Instant'}</option></select></label><label class="setting-row"><span>${signalCopy(save.settings.lang).setting}</span><select data-setting="telegraphs">${['boss', 'all', 'off'].map((mode, i) => `<option value="${mode}" ${save.settings.telegraphs === mode ? 'selected' : ''}>${signalCopy(save.settings.lang).modes[i]}</option>`).join('')}</select></label><p class="note">${signalCopy(save.settings.lang).hint}</p>${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${combatLabels(save.settings.lang).controls}</p><p>${combatLabels(save.settings.lang).autoHint}</p><p>${esc(tr('pointerHint'))}</p><p>${combatLabels(save.settings.lang).condition}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
+function settingsUI() { return heading(tr('settings')) + `${DEV || PLAYTEST ? `<p class="test-build">${equipmentCopy(save.settings.lang).testBuild}</p>${btn('test-currency', equipmentCopy(save.settings.lang).test)}` : ''}` + `<div class="settings-list"><label class="setting-row"><span>${save.settings.lang === 'ko' ? '알림 줄이기' : 'Fewer notifications'}</span><input type="checkbox" data-setting="lessNotices" ${save.settings.lessNotices ? 'checked' : ''}></label><label class="setting-row"><span>${save.settings.lang === 'ko' ? '움직임' : 'Movement'}</span><select data-setting="movement"><option value="weighted" ${save.settings.movement === 'weighted' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '무게감 (기본)' : 'Weighted (default)'}</option><option value="instant" ${save.settings.movement === 'instant' ? 'selected' : ''}>${save.settings.lang === 'ko' ? '즉시' : 'Instant'}</option></select></label><label class="setting-row"><span>${signalCopy(save.settings.lang).setting}</span><select data-setting="telegraphs">${['boss', 'all', 'off'].map((mode, i) => `<option value="${mode}" ${save.settings.telegraphs === mode ? 'selected' : ''}>${signalCopy(save.settings.lang).modes[i]}</option>`).join('')}</select></label><p class="note">${signalCopy(save.settings.lang).hint}</p>${['volume', 'music', 'sfx', 'shake'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="range" min="0" max="1" step=".05" value="${save.settings[k]}" data-setting="${k}"><output data-output="${k}">${Math.round(save.settings[k] * 100)}%</output></label>`).join('')}<label class="setting-row"><span>${tr('language')}</span><select data-setting="lang"><option value="ko" ${save.settings.lang === 'ko' ? 'selected' : ''}>${tr('korean')}</option><option value="en" ${save.settings.lang === 'en' ? 'selected' : ''}>${tr('english')}</option></select></label>${['reduced', 'numbers'].map(k => `<label class="setting-row"><span>${tr(k)}</span><input type="checkbox" data-setting="${k}" ${save.settings[k] ? 'checked' : ''}></label>`).join('')}<label class="setting-row"><span>${tr('fpsDisplay')}</span><input type="checkbox" data-setting="fpsDisplay" ${showPerf ? 'checked' : ''}></label><label class="setting-row"><span>${tr('quality')}</span><select data-setting="quality">${['auto', 'high', 'low'].map(q => `<option value="${q}" ${quality === q ? 'selected' : ''}>${tr(q === 'auto' ? 'qualityAuto' : q === 'high' ? 'qualityHigh' : 'qualityLow')}</option>`).join('')}</select></label><label class="setting-row"><span>${tr('largeProjectiles')}</span><input type="checkbox" data-setting="largeProjectiles" ${largeProjectiles ? 'checked' : ''}></label><label class="setting-row"><span>${tr('effectsTransparency')}</span><input type="range" min="0" max=".9" step=".05" value="${effectsTransparency}" data-setting="effectsTransparency"><output data-output="effectsTransparency">${Math.round(effectsTransparency * 100)}%</output></label></div><details class="control-guide"><summary>${tr('howToPlay')}</summary><p>${combatLabels(save.settings.lang).controls}</p><p>${combatLabels(save.settings.lang).autoHint}</p><p>${esc(tr('pointerHint'))}</p><p>${combatLabels(save.settings.lang).condition}</p><div class="evolution-guide">${WEAPONS.map((w, i) => `<p>${dict().weaponNames[i]} + ${dict().passiveNames[PASSIVES.findIndex(p => p.id === w.passive)]}<br>→ ${dict().evolutionNames[i]}</p>`).join('')}</div>${dict().sectorNames.map((name, i) => `<p><b>${name}</b><br>${esc(dict().sectorDescriptions[i])}</p>`).join('')}</details><p class="note">${tr('saveHint')}</p><a href="./CREDITS.md" target="_blank" rel="noopener">${tr('credits')}</a>`; }
 function rewardUI() { return metaRewardUI(save); }
-function resultUI() { if (sim instanceof RouteSimulation)
-    return routeResult(sim, save.settings.lang === 'ko'); const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${sim.chapter?.[save.settings.lang] ?? d.sectorNames[sim.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship"><canvas data-crew="${save.crew}" width="96" height="96"></canvas></div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${save.lastMetaLoot?.dust ?? r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && !r.special && r.sector < 7 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}${rewardUI()}<div class="button-row">${btn('shop', metaCopy(save.settings.lang).rooms)}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'primary', 'data-autofocus')}${btn('copy-record', tr('copyRecord'))}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
+function resultUI() { const r = sim.result(), d = dict(); resultAt = performance.now(); return `<div class="result-heading"><div class="result-stamp ${r.won ? 'cleared' : 'down'}"><h2>${tr(r.won ? 'victory' : 'defeat')}</h2></div><span>${sim.chapter?.[save.settings.lang] ?? d.sectorNames[sim.sector]}</span><div class="result-wallet wallet">${icon('shards')}<b data-tally="${save.shards}" data-delay=".8">0</b></div></div><div class="result-ship"><canvas data-crew="${save.crew}" width="96" height="96"></canvas></div><div class="report-stats"><div><b data-tally="${Math.floor(r.time)}" data-clock="true" data-delay="0">00:00</b><span>${tr('survived')}</span></div><div><b data-tally="${r.kills}" data-delay=".2">0</b><span>${tr('kills')}</span></div><div><b data-tally="${r.evolutions}" data-delay=".4">0</b><span>${tr('evolution')}</span></div></div><div class="reward">${icon('shards')}<span>${tr('earned')}</span><b data-tally="${save.lastMetaLoot?.dust ?? r.earned}" data-delay=".6">0</b>${Array.from({ length: 6 }, (_, i) => `<span class="dust-flight" style="--order:${i}">${icon('shards')}</span>`).join('')}</div>${r.won && !r.special && r.sector < 7 ? `<p class="new-sector">${tr('nextOpen')}</p>` : ''}${rewardUI()}<div class="button-row">${btn('shop', metaCopy(save.settings.lang).rooms)}${btn('retry', tr('retry'))}${btn('home', tr('home'), 'primary', 'data-autofocus')}${btn('copy-record', tr('copyRecord'))}${btn('skip-cue', tr('skipCue'), 'quiet')}</div>`; }
 function animateResults(now) { if (view !== 'result')
     return; for (const el of app.querySelectorAll('[data-tally]')) {
     const n = Number(el.dataset.tally), f = save.settings.reduced ? 1 : clamp((now - resultAt) / 1000 - Number(el.dataset.delay), 0, 1), value = Math.round(n * (1 - (1 - f) ** 3));
@@ -215,7 +210,6 @@ function aimDust() { if (view !== 'result')
 } }
 function soundUI() { return heading(tr('soundRoom')) + `<p>${tr('soundHint')}</p><div class="sound-tracks">${TRACKS.map((track, i) => `<div><b>${dict().trackNames[i]}</b>${[1, 2, 3].map(level => btn('sound-track', tr('intensity') + ' ' + level, 'small', `data-id="${track.id}:${level}"`)).join('')}</div>`).join('')}</div><div class="sound-effects">${SFX_IDS.map((id, i) => btn('sound-fx', dict().soundNames[i], 'small', `data-id="${id}"`)).join('')}</div><div class="button-row">${btn('sound-stop', tr('stopSound'))}${btn('settings', tr('settings'))}</div>`; }
 function drawUI() {
-    document.documentElement.classList.toggle('in-route', sim instanceof RouteSimulation && view === 'playing');
     document.documentElement.classList.toggle('in-combat', view === 'playing');
     document.documentElement.classList.toggle('in-practice', view === 'practice');
     document.documentElement.lang = save.settings.lang;
@@ -241,21 +235,12 @@ function drawUI() {
         return;
     }
     if (view === 'playing') {
-        app.innerHTML = hudUI() + (sim instanceof RouteSimulation ? routeHUD(sim, save.settings.lang === 'ko') : '');
-        drawRouteIcons(app);
+        app.innerHTML = hudUI();
         cosmos.resize(V.w, V.h, V.dpr, 'auto');
         updateHUD();
         return;
     }
     let content = '';
-    if (view === 'routeArchive') {
-        let archive = readRouteArchive(null);
-        try {
-            archive = readRouteArchive(localStorage.getItem(ROUTE_KEY));
-        }
-        catch { }
-        content = routeArchiveUI(archive, save.settings.lang === 'ko');
-    }
     if (view === 'equipment' || view === 'fusion' || view === 'gacha') {
         content = metaScreen.render(save, view, slotFilter, rankFilter, gearSort);
     }
@@ -299,15 +284,7 @@ function drawUI() {
     animateResults(performance.now());
     focusFirst();
 }
-function startRoute() { hub.closePanel(); hub.resetOverlay(); if (!routeReturnSave)
-    routeReturnSave = structuredClone(save); let seen = []; try {
-    seen = readRouteArchive(localStorage.getItem(ROUTE_KEY)).seen;
-}
-catch { } sim = new RouteSimulation(save, Date.now(), difficulty, seen); sim.autoCast = autoCast; sim.telegraphs = save.settings.telegraphs; try {
-    sim.directAim = localStorage.getItem(ROUTE_KEY + '.aim') === '1';
-}
-catch { } frameStats.reset(); V.camX = sim.player.x; V.camY = sim.player.y; audio.unlock(); setView('playing'); }
-function start() { routeReturnSave = null; hub.closePanel(); hub.resetOverlay(); if (!difficultyOpen(save, special ? 'village' : String(selectedSector), difficulty))
+function start() { hub.closePanel(); hub.resetOverlay(); if (!difficultyOpen(save, special ? 'village' : String(selectedSector), difficulty))
     return; if (special && !save.equipment.cleared.includes(1))
     return; if (!special && selectedSector > save.unlocked)
     return; audio.unlock(); audio.ui('start'); frameStats.reset(); sim = new Simulation(save.ship, save.meta, Date.now(), undefined, chapterDef(special ? 'village' : selectedSector).sector, difficulty, save.equipment, { chapter: special ? 'village' : selectedSector, crew: save.crew, movement: save.settings.movement }); applyRoomFeatures(sim, save); sim.autoCast = autoCast; sim.telegraphs = save.settings.telegraphs; V.camX = sim.player.x; V.camY = sim.player.y; setView('playing'); }
@@ -340,18 +317,7 @@ function choose(index) { if (view !== 'choice' || !offers[index] || !sim)
 else
     openChoice(); }
 function finish() { if (!sim)
-    return; if (sim instanceof RouteSimulation) {
-    if (!preview)
-        try {
-            saveRouteRecord(localStorage, sim);
-        }
-        catch {
-            toast(tr('saveWarning'));
-        }
-    audio.play(sim.status === 'won' ? 'clear' : 'down');
-    setView('result');
-    return;
-} const result = sim.result(); if (!save.settled.includes(result.id)) {
+    return; const result = sim.result(); if (!save.settled.includes(result.id)) {
     save.story = { ...save.story, deaths: save.story.deaths + Number(!result.won), bosses: save.story.bosses + (result.bosses ?? 0), chapter: Math.max(save.story.chapter, selectedSector), returns: save.story.returns + 1 };
 } save = settle(save, result); hub.returnToCapsule(); persist(); audio.play(sim.status === 'won' ? 'clear' : 'down'); setView('result'); }
 async function copyRecord() { if (!sim)
@@ -381,36 +347,6 @@ catch {
     box.select();
 } }
 function action(act, id = '') {
-    if (act === 'route-start') {
-        startRoute();
-        return;
-    }
-    if (act === 'route-home') {
-        if (routeReturnSave) {
-            save = routeReturnSave;
-            routeReturnSave = null;
-            audio.update(save.settings);
-        }
-        sim = null;
-        setView('title');
-        return;
-    }
-    if (act === 'route-archive') {
-        setView('routeArchive');
-        return;
-    }
-    if (act === 'route-door' && sim instanceof RouteSimulation) {
-        sim.chooseDoor(id);
-        return;
-    }
-    if (act === 'route-event' && sim instanceof RouteSimulation) {
-        sim.eventChoice(id);
-        if (sim.pendingChests || sim.pendingLevels)
-            openChoice();
-        else
-            drawUI();
-        return;
-    }
     if (act === 'enter-hub') {
         audio.unlock();
         setView('title');
@@ -501,7 +437,7 @@ function action(act, id = '') {
         return;
     }
     if (act === 'sound-fx') {
-        if (SFX_IDS.includes(id))
+        if (SFX_IDS.some(sound => sound === id))
             audio.play(id);
         return;
     }
@@ -624,8 +560,8 @@ function updateHUD() {
     fill('xp-fill', sim.xp / xpNeeded(sim.level));
     set('hud-xp', `${Math.floor(sim.xp / xpNeeded(sim.level) * 100)}%`);
     set('hud-ship', CREW.find(c => c.id === sim.crew).name);
-    set('hud-time', clock(sim instanceof RouteSimulation ? sim.elapsed : sim.time));
-    set('map-time', clock(sim instanceof RouteSimulation ? sim.elapsed : sim.time));
+    set('hud-time', clock(sim.time));
+    set('map-time', clock(sim.time));
     document.getElementById('status-box')?.classList.toggle('low', p.hp < p.maxHp * .25);
     set('dash-text', p.dashCD > 0 ? p.dashCD.toFixed(1) : tr('dash'));
     const boss = sim.enemies.find(e => e.type === 'boss' && e.hp > 0 && e.role === 'final') ?? sim.enemies.find(e => e.type === 'boss' && e.hp > 0);
@@ -673,16 +609,6 @@ function updateHUD() {
     document.getElementById('danger-label').hidden = save.settings.telegraphs === 'off' || !sim.hazards.some(h => h.age < h.warning && (h.boss || save.settings.telegraphs === 'all')) && !boss?.warnTime;
     set('objective-label', sim.beacon ? '◈' : sim.drops.length ? '▣' : '');
     document.getElementById('objective-label').title = sim.beacon ? tr('beaconDesc') : sim.drops.length ? tr('findChest') : '';
-    if (sim instanceof RouteSimulation) {
-        document.documentElement.dataset.routePhase = sim.phase;
-        set('hud-sector', sim.placeName[save.settings.lang]);
-        set('run-percent', Math.floor(sim.elapsed) + 's \u00b7 ' + (sim.depth + 1) + '/7');
-        const route = document.getElementById('route-hud'), html = routeHUD(sim, save.settings.lang === 'ko');
-        if (route && route.outerHTML !== html) {
-            route.outerHTML = html;
-            drawRouteIcons(app);
-        }
-    }
     updateCombatControls(sim, save.settings.lang);
     const chips = document.getElementById('upgrade-chips'), markup = `<div class="slot-label">${tr('weapon')} ${sim.weapons.length}/3</div><div class="slot-row">${Array.from({ length: 3 }, (_, i) => { const w = sim.weapons[i], wi = w ? WEAPONS.findIndex(d => d.id === w.id) : -1; return `<span class="slot ${w?.evolved ? 'evolved' : ''}" ${w ? `title="${esc(w.fusion ? combatCopy(save.settings.lang).fusionNames[FUSIONS.findIndex(f => f.id === w.fusion)] : w.evolved ? d.evolutionNames[wi] : d.weaponNames[wi])}"` : ''}>${w ? icon(w.id, w.evolved) + `<small>${w.evolved ? '&#9733;' : w.level >= 5 ? d.max : w.level}</small>` : ''}</span>`; }).join('')}</div><div class="slot-label">${tr('passive')} ${Object.keys(sim.passives).length}/4</div><div class="slot-row">${Array.from({ length: 4 }, (_, i) => { const id = Object.keys(sim.passives)[i]; return `<span class="slot">${id ? icon(id) + `<small>${sim.passives[id] >= 6 ? d.max : sim.passives[id]}</small>` : ''}</span>`; }).join('')}</div>${Object.values(sim.boosts).some(n => n > 0) ? `<div class="extra-boosts">${d.stacked}: ${d.boostDescriptions.map((label, i) => label.replace(/\d+/, String([sim.boosts.damage * 3, sim.boosts.hull * 5, sim.boosts.reach * 5][i]))).join(' / ')}</div>` : ''}`;
     if (chips.innerHTML !== markup)
@@ -697,7 +623,7 @@ function inputState() {
     x += joy.x;
     y += joy.y;
     const pad = Array.from(navigator.getGamepads?.() ?? []).find(p => p?.connected);
-    let ax = 0, ay = 0, manual = pointer.aim || sim instanceof RouteSimulation && sim.directAim;
+    let ax = 0, ay = 0, manual = pointer.aim;
     if (pad?.connected) {
         const v = deadzone(pad.axes[0] ?? 0, pad.axes[1] ?? 0);
         x += v.x;
@@ -709,13 +635,13 @@ function inputState() {
             manual = true;
         }
     }
-    if (pointer.down || pointer.aim || sim instanceof RouteSimulation && sim.directAim) {
+    if (pointer.down || pointer.aim) {
         const px = sim ? (sim.player.x - V.camX) * V.scale + V.w / 2 : V.w / 2, py = sim ? (sim.player.y - V.camY) * V.scale + V.h / 2 : V.h / 2, dx = pointer.x - px, dy = pointer.y - py, d = Math.hypot(dx, dy);
         if (pointer.down && d > 14) {
             x = dx / d;
             y = dy / d;
         }
-        if (pointer.aim || sim instanceof RouteSimulation && sim.directAim) {
+        if (pointer.aim) {
             ax = dx;
             ay = dy;
         }
@@ -783,17 +709,14 @@ function pollPad(now) {
     padBefore = pressed;
 }
 function advance(dt) { if (!sim || view !== 'playing' || stressPreview)
-    return; sim.viewWidth = V.w / V.scale; sim.viewHeight = V.h / V.scale; const dashBefore = sim.player.dashTime; sim.step(dt, sim instanceof RouteSimulation && sim.autoPilot ? pilotInput(sim) : inputState()); if (sim.player.dashTime > dashBefore)
-    audio.play('dash'); cosmos.consumeEvents(sim.events); audio.consume(sim instanceof RouteSimulation ? sim.events.filter(e => e.kind !== 'bossWarning') : sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }); if (!(sim instanceof RouteSimulation))
-    audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id); if (sim.events.some(e => e.kind === 'boss')) {
+    return; sim.viewWidth = V.w / V.scale; sim.viewHeight = V.h / V.scale; const dashBefore = sim.player.dashTime; sim.step(dt, inputState()); if (sim.player.dashTime > dashBefore)
+    audio.play('dash'); cosmos.consumeEvents(sim.events); audio.consume(sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }, sim.skillUses); audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id); if (sim.events.some(e => e.kind === 'boss')) {
     document.getElementById('cue-skip')?.remove();
     app.insertAdjacentHTML('beforeend', btn('skip-cue', tr('skipCue'), 'cue-skip', 'id="cue-skip"'));
 } sim.events.length = 0; if (sim.status !== 'playing') {
     finish();
     return;
-} if (sim instanceof RouteSimulation && sim.autoPilot)
-    resolvePilotChoices(sim);
-else if (!sim.bossKilled && (sim.pendingLevels || sim.pendingChests))
+} if (!sim.bossKilled && (sim.pendingLevels || sim.pendingChests))
     openChoice(); }
 function frame(now) {
     frameStats.observe(now, view === 'playing' && !document.hidden);
@@ -924,18 +847,7 @@ app.addEventListener('change', e => { const el = e.target; if (el.hasAttribute('
     persist();
     drawUI();
 } });
-app.addEventListener('input', e => { const el = e.target, k = el.dataset.setting; if (el.hasAttribute('data-route-auto') && sim instanceof RouteSimulation) {
-    sim.autoPilot = el.checked;
-    return;
-} if (el.dataset.setting === 'routeAim' && sim instanceof RouteSimulation) {
-    sim.directAim = el.checked;
-    if (!preview)
-        try {
-            localStorage.setItem(ROUTE_KEY + '.aim', el.checked ? '1' : '0');
-        }
-        catch { }
-    return;
-} if (k === 'movement') {
+app.addEventListener('input', e => { const el = e.target, k = el.dataset.setting; if (k === 'movement') {
     save.settings.movement = el.value === 'instant' ? 'instant' : 'weighted';
     if (sim)
         sim.movement = save.settings.movement;
@@ -1094,7 +1006,7 @@ document.addEventListener('visibilitychange', () => { resetInput(); if (document
     void audio.ctx?.suspend?.().catch(() => { });
 }
 else if (view !== 'pause')
-    audio.setScene(sim instanceof RouteSimulation ? 'pause' : view === 'intro' || view === 'title' || view === 'practice' ? 'title' : view === 'settings' && sim ? 'pause' : view); });
+    audio.setScene(view === 'intro' || view === 'title' || view === 'practice' ? 'title' : view === 'settings' && sim ? 'pause' : view); });
 const canvas = document.querySelector('#world');
 canvas.addEventListener('webglcontextlost', () => { if (view === 'playing')
     action('pause'); });
@@ -1152,7 +1064,6 @@ requestAnimationFrame(frame);
 if (parsed.warning || storageReadFailed)
     toast(tr(parsed.future ? 'futureSave' : 'saveWarning'));
 function previewScreen(screen) {
-    routeReturnSave = null;
     metaScreen.reset();
     audio.stop();
     hub.clearFlashes();
@@ -1229,36 +1140,6 @@ function previewScreen(screen) {
         returnView = 'title';
         shopReturn = 'title';
         setView(screen);
-        return;
-    }
-    if (screen.startsWith('route-')) {
-        sim = new RouteSimulation(save, 42);
-        const route = sim;
-        route.invincible = true;
-        if (screen === 'route-hangar')
-            route.depth = route.place = 1;
-        if (screen === 'route-fuel')
-            route.depth = route.place = 2;
-        if (screen === 'route-secret') {
-            route.depth = route.place = 2;
-            route.secret = true;
-            route.secrets = 1;
-        }
-        if (screen === 'route-doors') {
-            route.elapsed = route.roomTime = route.time = 75;
-            route.openDoors();
-        }
-        else {
-            route.setupRoom();
-            route.elapsed = route.time = 20;
-            route.roomTime = 20;
-            for (let i = 0; i < 36; i++)
-                route.spawn('rusher', 2350 + Math.cos(i * 2.4) * 250, 1630 + Math.sin(i * 2.4) * 210);
-        }
-        V.camX = 2400;
-        V.camY = 1600;
-        stressPreview = true;
-        setView('playing');
         return;
     }
     if (['launch', 'atmosphere', 'village'].includes(screen)) {

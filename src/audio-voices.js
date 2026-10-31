@@ -1,8 +1,9 @@
-import { soundDuration } from './audio-score.js';
-export const VOICE_LIMIT = 20;
+import { soundDuration, VARIANTS } from './audio-score.js';
+export const VOICE_LIMIT = 12;
 export function soundRule(id) {
     const important = ['warning', 'hurt', 'level', 'evolve', 'chest', 'boss', 'clear', 'down', 'resonance'].includes(id), tiny = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'kill', 'pickup', 'crystal', 'air', 'blast', 'wave', 'spark', 'gravity', 'field', 'prepare', 'dash', 'footgrass', 'footstone', 'footmetal', 'footwater'].includes(id);
-    return { limit: important ? 2 : 3, interval: important ? .1 : id === 'pickup' ? .06 : .05, priority: important ? (id === 'warning' || id === 'hurt' ? 4 : 5) : id === 'prepare' ? 2 : tiny ? 1 : 3, tiny };
+    const hit = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'blast', 'wave', 'spark', 'gravity', 'field'].includes(id);
+    return { limit: hit || id.startsWith('foot') ? 1 : 2, interval: hit ? .1 : important ? .15 : id === 'pickup' ? .06 : .08, priority: important ? (id === 'warning' || id === 'hurt' ? 4 : 5) : id === 'prepare' ? 2 : tiny ? 1 : 3, tiny, hit };
 }
 export class VoiceManager {
     active = [];
@@ -39,7 +40,7 @@ export class VoiceManager {
             const same = this.active.filter(v => v.id === r.id);
             let victim;
             if (same.length >= rule.limit)
-                victim = same.reduce((a, b) => a.start < b.start ? a : b);
+                continue;
             else if (this.active.length >= this.limit) {
                 const low = this.active.reduce((a, b) => a.priority < b.priority || (a.priority === b.priority && a.start < b.start) ? a : b);
                 if (low.priority > rule.priority)
@@ -56,11 +57,11 @@ export class VoiceManager {
                 this.pickupAt = now;
                 pitch *= 2 ** ([0, 2, 4, 5, 7, 9, 11, 12][this.pickupStep] / 12);
             }
-            const variant = ((this.variant.get(r.id) ?? -1) + 1) % 5;
+            const variant = ((this.variant.get(r.id) ?? -1) + 1) % VARIANTS;
             this.variant.set(r.id, variant);
             const jitter = 2 ** ((this.random() - .5) * .22 / 12);
             pitch *= jitter;
-            const gain = (r.id === 'air' ? .035 : rule.tiny ? .36 : .74) * (r.gain ?? 1) * (1 + Math.min(5, (r.count ?? 1) - 1) * .055);
+            const gain = (r.id === 'air' ? .012 : rule.hit ? .09 : rule.tiny ? .20 : .60) * (r.gain ?? 1) * (1 + Math.min(5, (r.count ?? 1) - 1) * .055);
             const voice = { token: this.nextToken++, id: r.id, start: now, end: now + soundDuration(r.id) / pitch, priority: rule.priority, gain, pitch, pan: view && r.x !== undefined ? Math.max(-.5, Math.min(.5, (r.x - view.x) / view.width)) : 0, variant };
             this.last.set(r.id, now);
             this.active.push(voice);

@@ -1,4 +1,17 @@
-export const AUDIO_BYTE_LIMIT = 15_000_000;
+import { ALL_SOUND_IDS, VARIANTS } from './audio-score.js';
+export const AUDIO_BYTE_LIMIT = 30_000_000;
+export function validManifest(m) {
+    if (!m || m.version !== 2 || !Array.isArray(m.sounds) || !Array.isArray(m.music) || m.sounds.length !== ALL_SOUND_IDS.length * VARIANTS || m.music.length !== 9)
+        return false;
+    const entries = [...m.sounds, ...m.music];
+    if (entries.some(s => !s || !Number.isInteger(s.bytes) || s.bytes <= 0 || !Number.isFinite(s.seconds) || s.seconds <= 0 || !/^[a-f0-9]{64}$/.test(s.sha256)) || new Set(entries.map(s => s.file)).size !== entries.length || entries.reduce((n, s) => n + s.bytes, 0) > AUDIO_BYTE_LIMIT)
+        return false;
+    if (m.sounds.some(s => !ALL_SOUND_IDS.includes(s.id) || !Number.isInteger(s.variant) || s.variant < 0 || s.variant >= VARIANTS || s.file !== `effects/${s.id}-${s.variant}.m4a` || s.seconds > 2.1))
+        return false;
+    if (m.music.some(s => !['a', 'b', 'c'].includes(s.option) || !['hub', 'combat', 'boss'].includes(s.role) || s.file !== `music/${s.option}-${s.role}.m4a` || !Number.isFinite(s.loopStart) || !Number.isFinite(s.loopEnd) || s.loopStart < 0 || s.loopEnd <= s.loopStart || s.loopEnd > s.seconds + .001))
+        return false;
+    return new Set(m.music.map(s => s.option + ':' + s.role)).size === 9;
+}
 export class SampleBank {
     manifest = null;
     buffers = new Map();
@@ -7,12 +20,8 @@ export class SampleBank {
     base;
     ctx;
     constructor(ctx, base = new URL('../assets/audio/', import.meta.url)) { this.ctx = ctx; this.base = base; }
-    async load() {
-        if (this.loading)
-            return this.loading;
-        this.loading = this.read().finally(() => { this.loading = null; });
-        return this.loading;
-    }
+    async load() { if (this.loading)
+        return this.loading; this.loading = this.read().finally(() => { this.loading = null; }); return this.loading; }
     async read() {
         try {
             if (!this.manifest) {
@@ -20,15 +29,12 @@ export class SampleBank {
                 if (!response.ok)
                     throw Error(`Audio manifest: ${response.status}`);
                 const manifest = await response.json();
-                if (manifest.version !== 1 || !Array.isArray(manifest.instruments) || !Array.isArray(manifest.sounds) || !manifest.room)
+                if (!validManifest(manifest))
                     throw Error('Invalid audio manifest');
-                const entries = [...manifest.instruments, ...manifest.sounds, manifest.room];
-                if (entries.some(s => !Number.isFinite(s.bytes) || s.bytes <= 0 || !/^(instruments\/[a-z0-9-]+|effects\/[a-z0-9-]+|room)\.m4a$/.test(s.file)) || entries.reduce((n, s) => n + s.bytes, 0) > AUDIO_BYTE_LIMIT)
-                    throw Error('Invalid audio asset budget');
                 this.manifest = manifest;
                 this.failures.delete('manifest');
             }
-            const entries = [...this.manifest.instruments, ...this.manifest.sounds, this.manifest.room].filter(s => !this.buffers.has(s.file));
+            const entries = this.manifest.sounds.filter(s => !this.buffers.has(s.file));
             let index = 0;
             await Promise.all(Array.from({ length: 6 }, async () => {
                 while (index < entries.length) {
@@ -36,13 +42,13 @@ export class SampleBank {
                     try {
                         const response = await fetch(new URL(sample.file, this.base));
                         if (!response.ok)
-                            throw Error(`Audio sample: ${response.status}`);
+                            throw Error(`Audio effect: ${response.status}`);
                         const bytes = await response.arrayBuffer();
                         if (bytes.byteLength !== sample.bytes)
-                            throw Error('Incomplete audio sample');
+                            throw Error('Incomplete audio effect');
                         const buffer = await this.ctx.decodeAudioData(bytes);
                         if (!buffer.length || !Number.isFinite(buffer.duration))
-                            throw Error('Empty audio sample');
+                            throw Error('Empty audio effect');
                         this.buffers.set(sample.file, buffer);
                         this.failures.delete(sample.file);
                     }
@@ -56,16 +62,5 @@ export class SampleBank {
             this.failures.set('manifest', String(error));
         }
     }
-    note(instrument, midi) {
-        const samples = this.manifest?.instruments.filter(s => s.instrument === instrument) ?? [];
-        const sample = samples.reduce((best, s) => !best || Math.abs(s.midi - midi) < Math.abs(best.midi - midi) ? s : best, undefined);
-        if (!sample)
-            return;
-        const buffer = this.buffers.get(sample.file);
-        if (!buffer)
-            return;
-        return { sample, buffer, pitch: 2 ** ((midi - sample.midi) / 12) };
-    }
-    sound(id, variant) { const sample = this.manifest?.sounds.find(s => s.id === id && s.variant === variant); return sample ? this.buffers.get(sample.file) : undefined; }
-    get room() { return this.manifest ? this.buffers.get(this.manifest.room.file) : undefined; }
+    sound(id, variant) { return this.buffers.get(`effects/${id}-${variant}.m4a`); }
 }
