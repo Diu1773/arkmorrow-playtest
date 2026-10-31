@@ -1,3 +1,4 @@
+import { bossWarningShapes, bossState } from './boss-director.js';
 export const warningProgress = (remaining, duration) => Math.max(0, Math.min(1, 1 - remaining / Math.max(.001, duration)));
 export const windupFrame = (e) => e.warnTime > 0 ? Math.min(2, Math.floor(warningProgress(e.warnTime, e.warnDuration) * 3)) : -1;
 const base = (x, y, boss, progress, flash = false) => ({ kind: 'disk', x, y, angle: 0, radius: 90, width: 28, length: 250, gaps: [], gapWidth: 0, gap: 0, progress, flash: flash && boss, boss, floor: true, opacity: boss ? .72 : .22, color: '#b45d68', sourceX: x, sourceY: y });
@@ -44,7 +45,7 @@ function bossPattern(e, p, progress, flash) {
 export function warningShapes(sim, mode = sim.telegraphs) {
     if (mode === 'off')
         return [];
-    const shapes = [];
+    const shapes = bossWarningShapes(sim);
     for (const h of sim.hazards) {
         if (!h.boss && mode !== 'all' || h.age > h.warning + 1 / 60)
             continue;
@@ -65,7 +66,7 @@ export function warningShapes(sim, mode = sim.telegraphs) {
         shapes.push(q);
     }
     for (const e of sim.enemies) {
-        if (e.hp <= 0)
+        if (e.hp <= 0 || bossState(e))
             continue;
         const boss = e.type === 'boss', flash = e.attackFlash > 0, p = e.warnTime > 0 ? e.pendingAttack : flash ? e.lastAttack : null;
         if (!p)

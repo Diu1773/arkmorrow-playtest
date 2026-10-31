@@ -134,3 +134,9 @@ Size: 1280 x 1280, 274931 bytes
 ## 개발 도구
 
 게임 실행 중 외부 라이브러리 요청은 없다. TypeScript(검사·빌드), Happy DOM와 @napi-rs/canvas(개발 검사), Node.js 타입 정의는 개발용이며 게임 빌드에는 넣지 않는다. 버전은 `package-lock.json`에 기록한다. 두 reference 폴더와 이전 검사 결과는 보존한다.
+
+## 오케스트라 샘플과 녹음 효과음
+
+- VS Chamber Orchestra 2 Community Edition / Versilian Studios. Recorded by Sam Gossner & Simon Dalzell; sample cutting by Elan Hickler / Soundemote. CC0 1.0 Universal, commercial use and redistribution permitted. Source: https://github.com/sgossner/VSCO-2-CE (revision 440300901dfe9275fd84e0b7763af1f8443ae62e). Selected strings, cello, contrabass, horn, trombone, harp and percussion recordings were trimmed, faded, downmixed and AAC compressed. License: assets/audio/LICENSES/orchestra.txt.
+- Impact Sounds 1.0 / Kenney (www.kenney.nl). CC0 1.0 Universal, commercial use and redistribution permitted. Source: https://kenney.nl/assets/impact-sounds. Selected foley recordings were trimmed, filtered, pitched, layered with acoustic instrument recordings and AAC compressed. License: assets/audio/LICENSES/effects.txt.
+- Music notation, arrangements and short diffuse room impulse: original project work. File-by-file source and processing record: docs/audio_sources.md in the source workspace. No complete third-party song was incorporated.

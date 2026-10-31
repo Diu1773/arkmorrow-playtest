@@ -1,14 +1,18 @@
+const minor = [0, 2, 3, 5, 7, 8, 10];
 export const TRACKS = [
-    { id: 'nebula', bpm: 96, root: 43, scale: [0, 2, 3, 5, 7, 8, 10], chords: [0, 8, 5, 10, 0, 3, 8, 7], motif: [0, 2, 4, 3, 2, 1, 3, 2] },
-    { id: 'open', bpm: 110, root: 45, scale: [0, 2, 3, 5, 7, 9, 10], chords: [0, 5, 10, 3, 0, 5, 7, 0], motif: [0, 2, 3, 4, 2, 3, 1, 4] },
-    { id: 'globular', bpm: 112, root: 40, scale: [0, 1, 3, 5, 7, 8, 10], chords: [0, 1, 0, 8, 5, 1, 8, 0], motif: [0, 1, 2, 1, 4, 3, 2, 1] },
-    { id: 'milkyway', bpm: 104, root: 38, scale: [0, 2, 3, 5, 7, 9, 10], chords: [0, 5, 10, 3, 0, 5, 7, 0], motif: [0, 3, 4, 3, 2, 3, 1, 0] },
-    { id: 'galaxies', bpm: 90, root: 41, scale: [0, 2, 3, 5, 7, 8, 10], chords: [0, 8, 3, 10, 5, 0, 8, 7], motif: [4, 3, 1, 2, 0, 1, 3, 0] },
-    { id: 'expansion', bpm: 100, root: 43, scale: [0, 1, 3, 5, 7, 8, 10], chords: [0, 1, 5, 8, 0, 10, 8, 1], motif: [0, 1, 2, 3, 2, 4, 3, 4] },
-    { id: 'boss', bpm: 118, root: 38, scale: [0, 1, 3, 5, 7, 8, 10], chords: [0, 1, 0, 8, 5, 1, 7, 0], motif: [0, 0, 1, 3, 0, 2, 1, 4] },
-    { id: 'title', bpm: 92, root: 43, scale: [0, 2, 4, 7, 9], chords: [0, 5, 9, 7, 2, 5, 0, 7], motif: [0, 2, 3, 4, 3, 1, 2, 0] }
+    { id: 'nebula', bpm: 92, root: 50, scale: minor, style: 'space' },
+    { id: 'open', bpm: 100, root: 55, scale: minor, style: 'space' },
+    { id: 'globular', bpm: 110, root: 52, scale: minor, style: 'pulse' },
+    { id: 'milkyway', bpm: 96, root: 50, scale: minor, style: 'space' },
+    { id: 'galaxies', bpm: 90, root: 53, scale: minor, style: 'space' },
+    { id: 'expansion', bpm: 104, root: 55, scale: minor, style: 'pulse' },
+    { id: 'boss', bpm: 118, root: 50, scale: minor, style: 'battle' },
+    { id: 'title', bpm: 92, root: 50, scale: minor, style: 'title' },
+    { id: 'launch', bpm: 108, root: 50, scale: minor, style: 'march' },
+    { id: 'atmosphere', bpm: 112, root: 50, scale: minor, style: 'rise' },
+    { id: 'refuge', bpm: 90, root: 50, scale: minor, style: 'solo' }
 ];
-export const FORM_BARS = 80;
+export const FORM_BARS = 40;
 export const barSeconds = (id) => 240 / TRACKS.find(t => t.id === id).bpm;
 export function musicIntensity(seconds, enemies, current = 1) {
     if (seconds >= 420 || enemies >= 650)
@@ -21,46 +25,80 @@ export function musicIntensity(seconds, enemies, current = 1) {
         return 2;
     return 1;
 }
+// The minor-third opening rises to a fifth before returning to the tonic.
+export const THEME = [[0, 0, 1.5], [1.5, 3, .5], [2, 7, 1], [3, 5, .75], [4, 3, 1.5], [5.5, 2, .5], [6, 0, 1.8], [8, 0, 1], [9, 3, 1], [10, 10, 1.5], [11.5, 7, .5], [12, 5, 1.5], [13.5, 2, .5], [14, 0, 1.8]];
 export function composeBar(id, bar, intensity) {
-    const t = TRACKS.find(t => t.id === id), b = ((bar % FORM_BARS) + FORM_BARS) % FORM_BARS, section = Math.floor(b / 16), beat = 60 / t.bpm, notes = [];
-    const chord = t.chords[(Math.floor(b / 2) + section) % 8], third = id === 'title' ? 4 : 3;
+    const t = TRACKS.find(t => t.id === id), b = ((bar % FORM_BARS) + FORM_BARS) % FORM_BARS, section = Math.floor(b / 8), beat = 60 / t.bpm, notes = [];
+    const harmony = [0, 0, 8, 8, 3, 3, 10, 7][b % 8], root = t.root + harmony + (section === 3 ? 5 : 0), battle = t.style === 'battle', march = t.style === 'march', solo = t.style === 'solo';
     const add = (instrument, midi, step, length, gain, pan = 0) => notes.push({ instrument, midi, time: step * beat, duration: length * beat, gain, pan });
-    const breath = .94 + (b % 11) * .006;
-    for (const [i, interval] of [0, third, 7, 10].entries())
-        add('pad', t.root + chord + interval, 0, 3.95, .16 * breath * (id === 'galaxies' ? .8 : 1), (i - 1.5) * .22);
-    const bassPattern = [[0, 2], [0, 1.5, 3], [0, .75, 2, 3.5], [0, 1, 2.5, 3.5], [0, 2, 3]][section];
-    for (const [i, step] of bassPattern.entries())
-        add('bass', t.root - 12 + chord + (i === bassPattern.length - 1 && b % 3 === 0 ? 7 : 0), step, .68, .46 * breath);
-    if (intensity >= 2) {
-        const stride = id === 'galaxies' ? 1 : .5, rotation = (b * 3 + section) % 8;
-        for (let i = 0; i < 4 / stride; i++) {
-            if ((i + b) % 7 === 0 && section % 2)
-                continue;
-            const degree = t.motif[(i + rotation) % 8], octave = section === 3 ? 12 : 0;
-            add('arp', t.root + chord + t.scale[degree] + octave, i * stride, .42, .065 + (i % 3) * .006, Math.sin(i * 2 + b) * .45);
+    const upper = (midi) => { while (midi > 83)
+        midi -= 12; return midi; };
+    const themeBar = b % 4, themeRoot = t.root + 12 + (section === 3 ? 5 : 0);
+    const melody = solo || t.style === 'title' ? 'harp' : section === 2 ? 'cello' : march || battle ? 'horn' : 'strings';
+    for (const [step, interval, length] of THEME) {
+        if (Math.floor(step / 4) !== themeBar)
+            continue;
+        add(melody, upper(themeRoot + interval - (section === 2 && !solo && t.style !== 'title' ? 12 : 0)), step % 4, length, solo ? .42 : .27, melody === 'strings' ? -.22 : .12);
+    }
+    if (solo) {
+        if (b % 2 === 0)
+            add('harp', root, 0, 3.4, .19, -.18);
+    }
+    else {
+        add('cello', root - 12, 0, 3.7, .22, -.18);
+        add('strings', upper(root + (harmony === 0 ? 3 : 4) + 12), .05, 3.7, .085, -.38);
+        add('strings', upper(root + 7 + 12), .1, 3.6, .075, .38);
+        if (march || battle) {
+            add('timpani', 50, 0, .85, .36);
+            add('drum', 36, 2, .6, .28);
         }
-        for (const step of id === 'boss' ? [0, 1.5, 2, 2.75] : b % 4 === 3 ? [0, 1.5, 2, 3.25] : [0, 2])
-            add('kick', 32, step, .48, id === 'boss' ? .62 : .54);
-        for (const step of [1, 3])
-            add('snare', 45, step, .28, .3);
-        for (let i = 0; i < 8; i++)
-            if ((i + b) % 5 !== 0)
-                add('hat', 60, i * .5, .09, i % 2 ? .06 : .04, (i % 2 ? 1 : -1) * .25);
+        if (t.style === 'space' || t.style === 'title')
+            for (const [i, interval] of [0, 7, 12].entries())
+                add('harp', upper(root + interval + 12), i * 1.25, .9, .14, (i - 1) * .45);
+        if (section === 1 || section === 4)
+            add('harp', upper(root + 7 + 12), 3.25, .55, .12, .35);
+        if (t.style === 'rise')
+            for (let i = 0; i < 4; i++)
+                add('shortstrings', upper(t.root + 12 + t.scale[(b + i) % 7]), i, .65, .15, -.3 + i * .2);
+    }
+    if (intensity >= 2) {
+        if (solo) {
+            add('harp', root + 7, 1.75, 1, .13, .2);
+            add('harp', root + 12, 3, 1, .12, -.2);
+        }
+        else {
+            add('bass', root - 24, 0, 1.8, .2, .08);
+            add('bass', root - 24, 2, 1.65, .18, .08);
+            const stride = battle ? .25 : march || t.style === 'pulse' ? .5 : 1;
+            for (let i = 0; i < 4 / stride; i++)
+                add('shortstrings', upper(root + 12 + [0, 7, harmony === 0 ? 3 : 4, 7, 0, 12, 7, harmony === 0 ? 3 : 4][(i + b) % 8]), i * stride, stride * .72, .12, i % 2 ? .25 : -.25);
+            if (!(t.style === 'space' && section === 2)) {
+                for (const step of [1, 3])
+                    add('snare', 60, step, .24, march ? .14 : .09);
+                add('timpani', 50, 2.5, .8, .2);
+            }
+        }
     }
     if (intensity === 3) {
-        const phrase = t.motif.map((n, i) => t.scale[t.motif[(i + section) % 8] ?? n]);
-        for (let i = 0; i < 4; i++)
-            if (!(b % 8 === 7 && i > 1))
-                add('lead', t.root + chord + phrase[(b * 2 + i) % 8] + (section === 3 ? 12 : 0), i + (b % 3 === 0 ? .25 : 0), i === 3 ? 1.15 : .8, .11, Math.sin(b) * .16);
-        for (const step of [1.75, 3.5])
-            add('kick', 36, step, .25, .31);
-        if (b % 4 === 3)
-            for (const step of [2.75, 3.25, 3.75])
-                add('snare', 50, step, .1, .12);
+        if (solo) {
+            add('harp', upper(themeRoot + 7), 3.5, .8, .1, .25);
+        }
+        else {
+            add('horn', upper(root + 7), 0, 2.7, .19, .2);
+            add('trombone', root - 12, 0, 1.4, .15, .3);
+            add('trombone', root - 5, 2, 1.3, .13, .3);
+            for (let i = 0; i < 4; i++)
+                add('harp', upper(root + 12 + [0, harmony === 0 ? 3 : 4, 7, 12][i]), i + .5, .65, .12, (i - 1.5) * .24);
+            if (b % 4 === 0)
+                add('cymbal', 60, 0, 1.8, .1, .35);
+            if (b % 4 === 3)
+                for (const step of [2.5, 3, 3.5, 3.75])
+                    add('timpani', 50, step, .22, .13);
+        }
     }
     return notes;
 }
-export const SFX_IDS = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'kill', 'pickup', 'crystal', 'hurt', 'warning', 'level', 'evolve', 'chest', 'boss', 'clear', 'down', 'resonance', 'hover', 'click', 'back', 'buy', 'locked', 'start', 'air', 'blast', 'wave', 'spark', 'gravity', 'field', 'prepare'];
+export const SFX_IDS = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'kill', 'pickup', 'crystal', 'hurt', 'warning', 'level', 'evolve', 'chest', 'boss', 'clear', 'down', 'resonance', 'hover', 'click', 'back', 'buy', 'locked', 'start', 'air', 'blast', 'wave', 'spark', 'gravity', 'field', 'prepare', 'dash', 'footgrass', 'footstone', 'footmetal', 'footwater'];
 export const SAMPLE_RATE = 32000;
 export const frequency = (midi) => 440 * 2 ** ((midi - 69) / 12);
 function finish(data, rate, wet) {
@@ -128,8 +166,8 @@ export function synth(instrument, midi, duration, sampleRate = SAMPLE_RATE, vari
     }
     return finish(data, sampleRate, instrument === 'pad' ? .55 : instrument === 'arp' || instrument === 'lead' ? .8 : .12);
 }
-export function soundDuration(id) { return { prepare: .12, blast: .48, wave: .55, spark: .16, gravity: .65, field: .24, level: 1.1, evolve: 1.8, chest: 1.9, boss: 1.7, clear: 2.1, down: 1.4, start: 1, resonance: .6, warning: .4, hurt: .25, air: .09, pickup: .19, crystal: .32, kill: .18, nova: .32, mine: .28, missile: .23 }[id] ?? .14; }
-const pitches = { prepare: 43, blast: 23, wave: 27, spark: 48, gravity: 25, field: 32, pulse: 40, orbit: 37, missile: 30, chain: 48, laser: 39, mine: 28, fan: 43, nova: 25, kill: 35, pickup: 72, crystal: 60, hurt: 31, warning: 48, level: 43, evolve: 38, chest: 41, boss: 26, clear: 43, down: 30, resonance: 33, hover: 45, click: 40, back: 36, buy: 43, locked: 30, start: 36, air: 24 };
+export function soundDuration(id) { return { dash: .28, prepare: .12, blast: .48, wave: .55, spark: .16, gravity: .65, field: .24, level: 1.1, evolve: 1.8, chest: 1.9, boss: 1.7, clear: 2.1, down: 1.4, start: 1, resonance: .6, warning: .4, hurt: .25, air: .09, pickup: .19, crystal: .32, kill: .18, nova: .32, mine: .28, missile: .23 }[id] ?? .14; }
+const pitches = { dash: 24, footgrass: 30, footstone: 30, footmetal: 30, footwater: 30, prepare: 43, blast: 23, wave: 27, spark: 48, gravity: 25, field: 32, pulse: 40, orbit: 37, missile: 30, chain: 48, laser: 39, mine: 28, fan: 43, nova: 25, kill: 35, pickup: 72, crystal: 60, hurt: 31, warning: 48, level: 43, evolve: 38, chest: 41, boss: 26, clear: 43, down: 30, resonance: 33, hover: 45, click: 40, back: 36, buy: 43, locked: 30, start: 36, air: 24 };
 export function synthSound(id, variant, sampleRate = SAMPLE_RATE) {
     const duration = soundDuration(id), data = new Float32Array(Math.ceil(duration * sampleRate)), long = duration >= 1, f = frequency(pitches[id] + (variant - 2) * .24);
     let noise = 1709 + variant * 7919, low = 0, body = 0, sub = 0;

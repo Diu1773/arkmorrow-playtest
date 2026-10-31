@@ -2,7 +2,7 @@ export function pixelContext(canvas){
  if(!globalThis.WebGLRenderingContext)return null;
  const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false,premultipliedAlpha:true,preserveDrawingBuffer:true});
  if(!gl)return null;
- let program,buffer,position,uv,color,resolution,atlases=[],images=new WeakMap(),vertices=new Float32Array(49152*8),used=0,current=null,framebuffer,layerTexture,layerW=0,layerH=0,lost=false;
+ let program,buffer,position,uv,color,resolution,atlases=[],images=new WeakMap(),vertices=new Float32Array(49152*8),used=0,current=null,framebuffer,layerTexture,layerW=0,layerH=0,warpTexture,warpW=0,warpH=0,warpFrame=-1,warpScene=null,lost=false;
  const debug=gl.getExtension('WEBGL_debug_renderer_info'),device=gl.getParameter(debug?debug.UNMASKED_RENDERER_WEBGL:gl.RENDERER);
  const opaque=[1,1,1,1];
  const atlasSize=Math.min(2048,gl.getParameter(gl.MAX_TEXTURE_SIZE)),colors=new Map(),stack=[];
@@ -16,7 +16,7 @@ export function pixelContext(canvas){
   gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);gl.deleteShader(vs);gl.deleteShader(fs);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));
   position=gl.getAttribLocation(program,'p');uv=gl.getAttribLocation(program,'t');color=gl.getAttribLocation(program,'c');resolution=gl.getUniformLocation(program,'r');buffer=gl.createBuffer();gl.useProgram(program);gl.uniform1i(gl.getUniformLocation(program,'s'),0);
   gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);gl.disable(gl.DEPTH_TEST);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,true);
-  atlases=[];images=new WeakMap();newAtlas();framebuffer=gl.createFramebuffer();layerTexture=texture();layerW=layerH=0;current=null;used=0;
+  atlases=[];images=new WeakMap();newAtlas();framebuffer=gl.createFramebuffer();layerTexture=texture();warpTexture=texture();layerW=layerH=warpW=warpH=0;warpFrame=-1;warpScene=null;current=null;used=0;
  }
  function flush(){
   if(!used||lost)return;
@@ -47,7 +47,14 @@ export function pixelContext(canvas){
   drawImage(image,...args){
    if(lost)return;const e=entry(image);let sx=0,sy=0,sw=e.w,sh=e.h,dx,dy,dw,dh;
    if(args.length===2){[dx,dy]=args;dw=sw;dh=sh;}else if(args.length===4)[dx,dy,dw,dh]=args;else [sx,sy,sw,sh,dx,dy,dw,dh]=args;
-   const a=this.globalAlpha;quad(e.atlas.texture,dx,dy,dw,dh,(e.x+sx)/atlasSize,(e.y+sy)/atlasSize,(e.x+sx+sw)/atlasSize,(e.y+sy+sh)/atlasSize,(a===1?opaque:[a,a,a,a]));
+   const a=this.globalAlpha,bias=image.pixelExact?1/1024:0;quad(e.atlas.texture,dx,dy,dw,dh,(e.x+sx+bias)/atlasSize,(e.y+sy+bias)/atlasSize,(e.x+sx+sw+bias)/atlasSize,(e.y+sy+sh+bias)/atlasSize,(a===1?opaque:[a,a,a,a]));
+  },
+  pixelWarp(draw,scene,frame){
+   if(lost)return;
+   // The opaque framebuffer is copied at the same cadence as the effect frames.
+   if(warpW!==canvas.width||warpH!==canvas.height||scene!==warpScene||frame!==warpFrame){flush();gl.bindTexture(gl.TEXTURE_2D,warpTexture);warpW=canvas.width;warpH=canvas.height;warpFrame=frame;warpScene=scene;gl.copyTexImage2D(gl.TEXTURE_2D,0,gl.RGB,0,0,warpW,warpH,0);}
+   draw((sx,sy,w,h,x,y)=>quad(warpTexture,x,y,w,h,sx/warpW,1-sy/warpH,(sx+w)/warpW,1-(sy+h)/warpH,opaque));
+   flush();
   },
   pixelLayer(draw,opacity){
    flush();if(layerW!==canvas.width||layerH!==canvas.height){layerW=canvas.width;layerH=canvas.height;gl.bindTexture(gl.TEXTURE_2D,layerTexture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,layerW,layerH,0,gl.RGBA,gl.UNSIGNED_BYTE,null);gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,layerTexture,0);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Pixel layer framebuffer incomplete');}else gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);

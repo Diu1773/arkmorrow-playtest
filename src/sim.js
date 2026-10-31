@@ -1,5 +1,7 @@
+import { effectFeedback } from './vfx-feedback.js';
 import { CHAPTER_RATE, CHAPTER_SECONDS, bossSchedule, swarmSchedule, arrivalFor } from './encounters.js';
 import { hordeTarget } from './horde.js';
+import { setupBoss, updateBoss, updateElite, updateBossWorld, arenaPoint, arenaSpawnAllowed, constrainArena, bounceArena, steerBossBullet, resetBossBullet, finishBoss } from './boss-director.js';
 import { chapterDef, LOCAL_ENEMIES, LOCAL_PATTERNS } from './chapters.js';
 import { CREW } from './crew.js';
 import { buildSurface, moveExpedition, updateSurface, hitProps, trace, localSpawn } from './surface.js';
@@ -203,8 +205,8 @@ export class Simulation {
             Object.assign(f, { x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: priority + 1, life: .5, maxLife: .5, color, inward, cx: x, cy: y });
         }
     }
-    dropChest(x, y) { if (this.drops.length < 80)
-        this.drops.push({ x, y, rank: rollRunChest(this.combatRandom, this.sector, this.passives.luck ?? 0) }); }
+    dropChest(x, y) { const point = arenaPoint(this, { x, y }); if (this.drops.length < 80)
+        this.drops.push({ ...point, rank: rollRunChest(this.combatRandom, this.sector, this.passives.luck ?? 0) }); }
     queueChest(rank) { const remaining = rank === 5 ? 1 : RUN_CHESTS.upgrades[rank]; this.chestQueue.push({ rank, remaining, chaos: rank === 5 ? Math.floor(this.combatRandom() * 3) : undefined }); this.pendingChests += remaining; if (rank === 4)
         this.gainXP(RUN_CHESTS.legendXP); }
     updateBehavior(e, dt, a, d) {
@@ -333,7 +335,7 @@ export class Simulation {
         }
     }
     updateHorde(dt) {
-        if (this.bossKilled)
+        if (this.bossKilled || !arenaSpawnAllowed(this, 'rusher'))
             return;
         const boss = this.enemies.some(e => e.type === 'boss' && e.hp > 0), target = hordeTarget(this.timeline, boss, this.time < this.swarmUntil);
         if (boss) {
@@ -386,7 +388,7 @@ export class Simulation {
     get mode() { return MODES[this.difficulty]; }
     emit(kind, x = this.player.x, y = this.player.y, value = 0, color = '#ffd260', weapon, size) { if (kind === 'shoot') {
         this.muzzleTime = .09;
-    } const event = { kind, x, y, value, color, weapon, size }; if (this.events.length < 120)
+    } const event = { kind, x, y, value, color, weapon, size }; effectFeedback(this, event); if (this.events.length < 120)
         this.events.push(event);
     else if (['hurt', 'warning', 'level', 'boss', 'evolve', 'chest', 'reaction', 'bossWarning'].includes(kind)) {
         const i = this.events.findIndex(e => ['hit', 'shoot', 'kill', 'pickup'].includes(e.kind));
@@ -394,6 +396,8 @@ export class Simulation {
             this.events[i] = event;
     } }
     spawn(type, x, y, role = '', elite = false, crowd = false, bossPhase) {
+        if (!arenaSpawnAllowed(this, type, bossPhase === true && !crowd))
+            return null;
         if (this.expedition)
             type = localSpawn(this, type, crowd);
         if (this.expedition && x === undefined && y === undefined) {
@@ -430,6 +434,7 @@ export class Simulation {
             return null;
         Object.assign(b, { x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, r: enemy ? 6 : 4, damage, life, age: 0, kind, color, pierce, targetId: 0, weapon, split: false, reflected: false });
         b.hit.clear();
+        resetBossBullet(b);
         return b;
     }
     effect(kind, x, y, radius, color, life = .5, damage = 0, x2 = 0, y2 = 0, repeat = false, weapon = 'pulse') { const e = this.effectPool.acquire(); if (!e)
@@ -745,6 +750,7 @@ export class Simulation {
             for (const d of this.drops) {
                 d.x = clamp(d.x + (d.x - p.x) * .035 * dt, 30, 4770);
                 d.y = clamp(d.y + (d.y - p.y) * .035 * dt, 30, 3170);
+                arenaPoint(this, d);
             }
         if (this.sector === 4 && !this.terrain.some(t => Math.hypot(p.x - t.x, p.y - t.y) < t.r))
             this.spawnBoost = .6;
@@ -793,6 +799,10 @@ export class Simulation {
         let angle = a, speed = e.speed * this.mode.speed;
         e.angle = e.warnTime > 0 ? e.pendingAttack?.angle ?? a : e.action === 'charging' || e.action === 'bossCharge' ? e.actionAngle : a;
         e.hidden = e.type !== 'boss' && (e.action === 'teleport' || e.action === 'burrow' || (this.blackout > 0 && d > 240) || (p.inDark && d > 260) || (d > 220 && !!this.inside('dark', e.x, e.y)));
+        if (e.type === 'boss' && updateBoss(this, e, dt))
+            return;
+        if (updateElite(this, e, dt))
+            return;
         if (e.type !== 'boss' && this.updateBehavior(e, dt, a, d))
             return;
         if (e.status.freeze > 0 || e.status.stun > 0)
@@ -1118,8 +1128,11 @@ export class Simulation {
                     b.vy += (Math.sin(a) * 350 - b.vy) * Math.min(1, dt * 7);
                 }
             }
+            if (enemy)
+                steerBossBullet(this, b, dt);
             b.x += b.vx * dt;
             b.y += b.vy * dt;
+            bounceArena(this, b, enemy);
             if (enemy && !b.reflected)
                 for (const t of this.terrain) {
                     if (t.kind !== 'reflection')
@@ -1290,6 +1303,7 @@ export class Simulation {
                 const record = this.bossRecords.find(r => r.id === e.id);
                 if (record)
                     record.killed = this.time;
+                finishBoss(this, e);
                 if (e.role === 'final') {
                     this.bossKilled = true;
                     this.bossDefeatedAt = this.time;
@@ -1357,6 +1371,7 @@ export class Simulation {
         }
         if (Math.hypot(m.x, m.y) > .1)
             p.angle = Math.atan2(m.y, m.x);
+        constrainArena(this);
         for (const o of this.obstacles) {
             if (!o.solid)
                 continue;
@@ -1387,7 +1402,7 @@ export class Simulation {
                 this.bossWarning = this.encounterIndex;
                 this.emit('bossWarning', p.x, p.y, encounter.role === 'final' ? 1 : 0);
             }
-            if (encounter && this.time >= encounter.at) {
+            if (encounter && this.time >= encounter.at && arenaSpawnAllowed(this, 'rusher')) {
                 const e = this.spawn('boss', p.x + 220, p.y - 120, encounter.role);
                 if (e) {
                     e.bossArt = encounter.art < 0 ? this.sector : encounter.art;
@@ -1395,6 +1410,7 @@ export class Simulation {
                     e.hp = e.maxHp = encounter.hp * this.mode.hp * (1 + this.sector * .12) * (this.chapter?.bossHp ?? 1) * (this.expedition ? CHAPTER_RATE : 1);
                     e.xp = encounter.role === 'final' ? 900 : encounter.role === 'middle' ? 400 : 180;
                     e.r = encounter.role === 'captain' ? 52 : encounter.role === 'middle' ? 66 : 78;
+                    setupBoss(this, e);
                     this.bossRecords.push({ id: e.id, art: e.bossArt, role: e.role, spawned: this.time, killed: null, phases: [], hp: e.maxHp });
                     this.encounterIndex++;
                     if (e.role === 'middle')
@@ -1411,7 +1427,8 @@ export class Simulation {
                 this.swarmStarted = this.time;
                 this.arrivalSites = [];
                 this.swarmIndex++;
-                this.emit('swarm');
+                if (!this.expedition)
+                    this.emit('swarm');
                 for (let i = 0; i < swarm.count; i++) {
                     const a = i / swarm.count * TAU, d = 450 + i % 4 * 35;
                     if (!this.expedition)
@@ -1429,6 +1446,8 @@ export class Simulation {
                 this.beacon = { x: clamp(p.x + 250, 100, 4700), y: clamp(p.y + 150, 100, 3100), r: 30, hp: 130 + this.sector * 30, maxHp: 130 + this.sector * 30, flash: 0 };
             this.nextBeacon += 100 * (this.expedition ? CHAPTER_RATE : 1);
         }
+        if (this.beacon)
+            arenaPoint(this, this.beacon, 80);
         if (this.time >= this.nextSupply && this.nextSupply <= 480 * (this.expedition ? CHAPTER_RATE : 1)) {
             this.dropChest(clamp(p.x + 80, 50, 4750), clamp(p.y + 40, 50, 3150));
             this.nextSupply += 120 * (this.expedition ? CHAPTER_RATE : 1);
@@ -1487,6 +1506,7 @@ export class Simulation {
         this.updateProjectiles(this.shotPool, dt, false);
         this.updateProjectiles(this.bulletPool, dt, true);
         this.updateHazards(dt);
+        updateBossWorld(this, dt);
         updateBattleEffects(this, dt);
         if (this.equipment.traits.chaosHelmet && this.time >= this.chaosHelmetAt) {
             this.chaosHelmetAt = this.time + 12;
@@ -1506,6 +1526,7 @@ export class Simulation {
             if (this.sector === 5 && !g.pull && g.age < 18) {
                 g.x += (g.x - p.x) * .05 * dt;
                 g.y += (g.y - p.y) * .05 * dt;
+                arenaPoint(this, g);
             }
             if (g.pull || g.kind === 'xp' && g.age >= 18) {
                 const speed = g.pull ? (firstRecovery && g.kind === 'xp' ? Math.max(600, 340 + Math.max(0, s.magnet - d) * 6) : 340 + Math.max(0, s.magnet - d) * 6) : Math.min(180, 35 + (g.age - 18) * 5), travel = Math.min(d, speed * dt);

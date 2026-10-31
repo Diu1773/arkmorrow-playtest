@@ -97,7 +97,7 @@ function resetInput() { frameStats.break(); const stick = document.getElementByI
 function focusFirst() { (app.querySelector('[data-autofocus]:not(:disabled)') ?? app.querySelector('button:not(:disabled),select,input'))?.focus({ preventScroll: true }); }
 function visibleEnemies() { return sim?.enemies.reduce((n, e) => n + Number(e.hp > 0 && !e.hidden && Math.abs(e.x - V.camX) < V.w / V.scale / 2 + e.r && Math.abs(e.y - V.camY) < V.h / V.scale / 2 + e.r), 0) ?? 0; }
 function setView(next) { app.classList.remove('cue-skipped'); view = next; resetInput(); audio.setScene(view === 'settings' && sim ? 'pause' : view); if (view === 'playing' && sim)
-    audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0)); drawUI(); }
+    audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id); drawUI(); }
 function shipCanvas(id, large = false) { return `<canvas class="${large ? 'hero-ship' : 'ship-preview'}" data-ship="${id}" width="${large ? 432 : 96}" height="${large ? 336 : 96}" aria-label="${esc(dict().shipNames[SHIPS.findIndex(s => s.id === id)])}"></canvas>`; }
 function drawShips() {
     for (const ca of app.querySelectorAll('[data-crew]')) {
@@ -601,9 +601,9 @@ function updateHUD() {
     const bossLabel = (art, final) => sim.expedition && localBossName(sim.chapter.id, art, final) || d.bossNames[art];
     if (remaining <= 2.5 && remaining > 0)
         announce('warning:' + sim.encounterIndex, (save.settings.lang === 'ko' ? '접근 감지 · ' : 'Approaching · ') + bossLabel(next.art < 0 ? sim.sector : next.art, next.role === 'final'), 2);
-    if (last && sim.time - last.spawned < 1.5)
+    if (last && sim.time - last.spawned >= (sim.expedition ? 1.1 : 0) && sim.time - last.spawned < (sim.expedition ? 2.6 : 1.5))
         announce('boss:' + last.id, (last.role === 'final' ? (save.settings.lang === 'ko' ? '최종 보스 · ' : 'Final boss · ') : '') + bossLabel(last.art, last.role === 'final'), 3);
-    if (sim.swarmIndex && sim.time - sim.swarmStarted < 1.5)
+    if (!sim.expedition && sim.swarmIndex && sim.time - sim.swarmStarted < 1.5)
         announce('swarm:' + sim.swarmIndex, arrivalNames[save.settings.lang][arrivalFor(sim.chapter?.id ?? '')]);
     const message = combatNotice.current(performance.now()), incoming = document.getElementById('incoming');
     incoming.hidden = !message;
@@ -726,7 +726,8 @@ function pollPad(now) {
     padBefore = pressed;
 }
 function advance(dt) { if (!sim || view !== 'playing' || stressPreview)
-    return; sim.viewWidth = V.w / V.scale; sim.viewHeight = V.h / V.scale; sim.step(dt, inputState()); cosmos.consumeEvents(sim.events); audio.consume(sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }); audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0)); if (sim.events.some(e => e.kind === 'boss')) {
+    return; sim.viewWidth = V.w / V.scale; sim.viewHeight = V.h / V.scale; const dashBefore = sim.player.dashTime; sim.step(dt, inputState()); if (sim.player.dashTime > dashBefore)
+    audio.play('dash'); cosmos.consumeEvents(sim.events); audio.consume(sim.events, { x: V.camX, y: V.camY, width: V.w / V.scale, height: V.h / V.scale }); audio.combat(sim.sector, sim.timeline, visibleEnemies(), sim.enemies.some(e => e.type === 'boss' && e.hp > 0), sim.enemies.some(e => e.role === 'final' && e.hp > 0), sim.chapter?.id); if (sim.events.some(e => e.kind === 'boss')) {
     document.getElementById('cue-skip')?.remove();
     app.insertAdjacentHTML('beforeend', btn('skip-cue', tr('skipCue'), 'cue-skip', 'id="cue-skip"'));
 } sim.events.length = 0; if (sim.status !== 'playing') {

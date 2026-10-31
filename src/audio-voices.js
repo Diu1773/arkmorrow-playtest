@@ -1,7 +1,7 @@
 import { soundDuration } from './audio-score.js';
 export const VOICE_LIMIT = 20;
 export function soundRule(id) {
-    const important = ['warning', 'hurt', 'level', 'evolve', 'chest', 'boss', 'clear', 'down', 'resonance'].includes(id), tiny = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'kill', 'pickup', 'crystal', 'air', 'blast', 'wave', 'spark', 'gravity', 'field', 'prepare'].includes(id);
+    const important = ['warning', 'hurt', 'level', 'evolve', 'chest', 'boss', 'clear', 'down', 'resonance'].includes(id), tiny = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'kill', 'pickup', 'crystal', 'air', 'blast', 'wave', 'spark', 'gravity', 'field', 'prepare', 'dash', 'footgrass', 'footstone', 'footmetal', 'footwater'].includes(id);
     return { limit: important ? 2 : 3, interval: important ? .1 : id === 'pickup' ? .06 : .05, priority: important ? (id === 'warning' || id === 'hurt' ? 4 : 5) : id === 'prepare' ? 2 : tiny ? 1 : 3, tiny };
 }
 export class VoiceManager {

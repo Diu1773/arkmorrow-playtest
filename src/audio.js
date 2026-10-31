@@ -1,6 +1,7 @@
 import { elementOf } from './battle.js';
-import { barSeconds, composeBar, musicIntensity, SAMPLE_RATE, synth, synthSound } from './audio-score.js';
+import { barSeconds, composeBar, musicIntensity } from './audio-score.js';
 import { VoiceManager, soundRule } from './audio-voices.js';
+import { SampleBank } from './audio-samples.js';
 export const MUSIC_VOICE_LIMIT = 32;
 export class AudioEngine {
     ctx = null;
@@ -12,7 +13,6 @@ export class AudioEngine {
     voices = new VoiceManager();
     nodes = new Map();
     musicNodes = new Set();
-    buffers = new Map();
     playing = false;
     track = 'title';
     requestedTrack = 'title';
@@ -27,8 +27,10 @@ export class AudioEngine {
     musicGroups = new Set();
     victoryUntil = 0;
     bossActive = false;
-    worker = null;
-    pendingTimbres = new Set();
+    bank = null;
+    ready = null;
+    room = null;
+    roomLevel = null;
     constructor(settings) { this.settings = settings; }
     async unlock() {
         try {
@@ -51,18 +53,21 @@ export class AudioEngine {
                 this.sfx.connect(this.master);
                 this.small.connect(this.sfx);
                 this.update(this.settings);
-                if (typeof Worker !== 'undefined')
-                    try {
-                        this.worker = new Worker(new URL('./audio-worker.js', import.meta.url), { type: 'module' });
-                        this.worker.onmessage = (event) => { this.pendingTimbres.delete(event.data.key); this.buffer(event.data.key, () => event.data.samples); };
-                        this.worker.onerror = () => { this.worker?.terminate(); this.worker = null; this.pendingTimbres.clear(); };
-                    }
-                    catch {
-                        this.worker = null;
-                    }
+                this.room = ctx.createConvolver();
+                this.roomLevel = ctx.createGain();
+                this.roomLevel.gain.value = .14;
+                this.room.connect(this.roomLevel);
+                this.roomLevel.connect(this.music);
+                this.bank = new SampleBank(ctx);
             }
             if (this.ctx.state === 'suspended')
                 await this.ctx.resume();
+            if (this.bank) {
+                this.ready = this.bank.load();
+                await this.ready;
+                if (this.bank.room && this.room.buffer !== this.bank.room)
+                    this.room.buffer = this.bank.room;
+            }
         }
         catch {
             this.ctx = null;
@@ -76,16 +81,16 @@ export class AudioEngine {
         const active = scene === 'playing' || scene === 'title' || scene === 'shop' || scene === 'settings';
         this.playing = active;
         if (scene !== 'playing') {
-            this.requestedTrack = 'title';
+            this.requestedTrack = scene === 'shop' ? 'refuge' : 'title';
             this.requestedIntensity = 1;
         }
         if (!active)
             this.stopMusic();
     }
-    combat(sector, seconds, enemies, boss, final = false) {
+    combat(sector, seconds, enemies, boss, final = false, chapter) {
         if (this.manual)
             return;
-        const track = boss ? 'boss' : ['nebula', 'open', 'globular', 'milkyway', 'galaxies', 'expansion'][sector] ?? 'nebula';
+        const track = boss ? 'boss' : chapter === 'launch' ? 'launch' : chapter === 'atmosphere' ? 'atmosphere' : chapter === 'village' ? 'refuge' : ['nebula', 'open', 'globular', 'milkyway', 'galaxies', 'expansion'][sector] ?? 'nebula';
         if (boss && !this.bossActive && this.ctx)
             this.nextBar = Math.min(this.nextBar, this.ctx.currentTime + .025);
         this.bossActive = boss;
@@ -118,17 +123,6 @@ export class AudioEngine {
         node.source.stop();
     }
     catch { /* Finished buffers need no second stop. */ } node.source.disconnect(); node.gain.disconnect(); node.pan.disconnect(); }
-    buffer(key, make) {
-        const old = this.buffers.get(key);
-        if (old)
-            return old;
-        const samples = make(), buffer = this.ctx.createBuffer(1, samples.length, SAMPLE_RATE);
-        buffer.getChannelData(0).set(samples);
-        if (this.buffers.size >= 320)
-            this.buffers.delete(this.buffers.keys().next().value);
-        this.buffers.set(key, buffer);
-        return buffer;
-    }
     node(buffer, at, gain, pan, destination, pitch = 1) {
         const ctx = this.ctx, source = ctx.createBufferSource(), level = ctx.createGain(), position = ctx.createStereoPanner();
         source.buffer = buffer;
@@ -142,29 +136,23 @@ export class AudioEngine {
         return { source, gain: level, pan: position, start: at, end: at + buffer.duration / pitch };
     }
     startVoice(voice) {
-        const buffer = this.buffer(`fx:${voice.id}:${voice.variant}`, () => synthSound(voice.id, voice.variant));
+        const buffer = this.bank?.sound(voice.id, voice.variant);
+        if (!buffer) {
+            this.voices.release(voice.token);
+            return;
+        }
         const node = this.node(buffer, voice.start, voice.gain, voice.pan, soundRule(voice.id).tiny ? this.small : this.sfx, voice.pitch);
         this.nodes.set(voice.token, node);
+        const end = Math.min(node.end, voice.end);
+        node.gain.gain.setValueAtTime(voice.gain, Math.max(voice.start, end - .015));
+        node.gain.gain.linearRampToValueAtTime(0, end);
+        node.source.stop(end);
+        node.end = end;
         node.source.onended = () => { node.source.disconnect(); node.gain.disconnect(); node.pan.disconnect(); this.nodes.delete(voice.token); this.voices.release(voice.token); };
     }
     play(id, options = {}) { if (this.queue.length < 256)
         this.queue.push({ id, ...options }); }
-    warmMusic(notes) {
-        if (!this.worker)
-            return true;
-        let ready = true;
-        for (const note of notes) {
-            const key = `${note.instrument}:${note.midi}:${note.duration.toFixed(4)}`;
-            if (this.buffers.has(key))
-                continue;
-            ready = false;
-            if (!this.pendingTimbres.has(key)) {
-                this.pendingTimbres.add(key);
-                this.worker.postMessage({ key, note });
-            }
-        }
-        return ready;
-    }
+    warmMusic(notes) { return notes.every(note => !!this.bank?.note(note.instrument, note.midi)); }
     ui(type = 'select') { this.play(type === 'select' ? 'click' : type === 'result' ? 'clear' : type); }
     skipCue() { this.queue = this.queue.filter(r => soundRule(r.id).priority < 5); for (const voice of [...this.voices.active])
         if (voice.priority >= 5) {
@@ -189,7 +177,7 @@ export class AudioEngine {
             }
             let id;
             if (e.kind === 'foot' || e.kind === 'material') {
-                this.play(e.kind === 'foot' ? 'air' : 'pulse', { gain: e.kind === 'foot' ? .22 : .35, x: e.x, y: e.y, pitch: [.65, 1.4, .8, 1.8, .95, 1.1][e.value] ?? 1 });
+                this.play(e.kind === 'foot' ? ['footgrass', 'footstone', 'footstone', 'footmetal', 'footgrass', 'footwater'][e.value] ?? 'footstone' : e.value === 0 ? 'fan' : 'pulse', { gain: e.kind === 'foot' ? .24 : .35, x: e.x, y: e.y });
                 continue;
             }
             if (e.kind === 'shoot')
@@ -223,7 +211,10 @@ export class AudioEngine {
                 this.releaseNode(node);
                 this.nodes.delete(token);
             }
-        const result = this.voices.flush(this.queue.splice(0), now, this.spatial);
+        const queued = this.queue.splice(0), available = queued.filter(r => !!this.bank?.sound(r.id, this.voices.variant.has(r.id) ? (this.voices.variant.get(r.id) + 1) % 5 : 0));
+        if (this.bank?.loading)
+            this.queue.push(...queued.filter(r => !available.includes(r)).slice(-32));
+        const result = this.voices.flush(available, now, this.spatial);
         for (const token of result.stolen) {
             const node = this.nodes.get(token);
             if (node) {
@@ -268,6 +259,7 @@ export class AudioEngine {
             this.musicGroup.gain.setValueAtTime(0, at);
             this.musicGroup.gain.setTargetAtTime(1, at, .09);
             this.musicGroup.connect(this.music);
+            this.musicGroup.connect(this.room);
             this.musicGroups.add(this.musicGroup);
             this.track = this.requestedTrack;
         }
@@ -279,11 +271,21 @@ export class AudioEngine {
         this.nextBar = at + barSeconds(this.track);
     }
     schedule(note, at) {
-        const start = at + note.time, end = start + note.duration;
+        const selected = this.bank?.note(note.instrument, note.midi);
+        if (!selected)
+            return;
+        const { sample, buffer, pitch } = selected, start = at + note.time, release = sample.release ?? .08;
+        const end = Math.min(start + note.duration + release, start + buffer.duration / pitch);
         if ([...this.musicNodes].filter(node => node.start < end && node.end > start).length >= MUSIC_VOICE_LIMIT)
             return;
-        const key = `${note.instrument}:${note.midi}:${note.duration.toFixed(4)}`, buffer = this.buffer(key, () => synth(note.instrument, note.midi, note.duration));
-        const node = this.node(buffer, at + note.time, note.gain, note.pan, this.musicGroup);
+        const node = this.node(buffer, start, 0, note.pan, this.musicGroup, pitch), gain = node.gain.gain;
+        const attackEnd = Math.min(start + (sample.attack ?? .004), end - .002), releaseAt = Math.max(attackEnd, end - release);
+        gain.setValueAtTime(0, start);
+        gain.linearRampToValueAtTime(note.gain, attackEnd);
+        gain.setValueAtTime(note.gain, releaseAt);
+        gain.linearRampToValueAtTime(0, end);
+        node.end = end;
+        node.source.stop(end + .002);
         this.musicNodes.add(node);
         node.source.onended = () => { node.source.disconnect(); node.gain.disconnect(); node.pan.disconnect(); this.musicNodes.delete(node); if (!this.musicNodes.size) {
             for (const group of this.musicGroups)

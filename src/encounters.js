@@ -1,7 +1,8 @@
 import { BOSS_ENCOUNTERS, SWARM_EVENTS } from './data.js';
+import { DUEL_ENCOUNTERS } from './boss-catalog.js';
 export const CHAPTER_SECONDS = 480;
 export const CHAPTER_RATE = CHAPTER_SECONDS / 600;
-export const CHAPTER_BOSSES = BOSS_ENCOUNTERS.map(b => ({ ...b, at: b.at * CHAPTER_RATE }));
+export const CHAPTER_BOSSES = DUEL_ENCOUNTERS;
 export const CHAPTER_SWARMS = [{ at: 118, duration: 22, count: 72 }, { at: 264, duration: 24, count: 100 }, { at: 376, duration: 22, count: 120 }];
 export const bossSchedule = (chapter) => chapter ? CHAPTER_BOSSES : BOSS_ENCOUNTERS;
 export const swarmSchedule = (chapter) => chapter ? CHAPTER_SWARMS : SWARM_EVENTS;
