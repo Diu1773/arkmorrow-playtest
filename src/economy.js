@@ -1,9 +1,10 @@
+import { equipmentPower } from './meta-equipment.js';
 export { CHAPTERS } from './chapters.js';
-import { GEAR, SLOTS, addItem, gearBonus, slotRecord } from './equipment.js';
+import { GEAR, SLOTS, addItem, slotRecord } from './equipment.js';
 export const ECONOMY = { pullCost: 30, pullRates: [.5, .3, .16, .035, .005, 0], rarePity: 10, epicPity: 40, firstGems: 120, achievementGems: 60, dropBase: .12, dropTime: .0005, goldTime: .5, goldKills: .12, firstChests: 1, levelGold: 35, salvageFraction: .5, salvageGold: 15, salvageBlueprints: 2, testGold: 100000, testGems: 3000, testBlueprints: 1000, beaconShards: 15, eliteShards: 20, middleShards: 35, bossShards: 80, cardShards: 20 };
 export const shardReward = (time, kills, bonus, won) => Math.floor(time / 8) + Math.floor(kills / 8) + Math.floor(bonus) + (won ? 100 : 0);
 export function testCurrency(s) { return { ...s, gold: s.gold + ECONOMY.testGold, gems: s.gems + ECONOMY.testGems, blueprints: Object.fromEntries(SLOTS.map(slot => [slot, s.blueprints[slot] + ECONOMY.testBlueprints])) }; }
-export function combatPower(save) { const b = gearBonus(save.equipment), m = save.meta; const offense = 1 + b.attack + m.output * .06; const defense = 1 + (b.hp + m.hull * 12) / 100 + (b.armor + m.guard) * .04 + (m.repair * .2) * .3; const utility = m.thrust * .02 + m.magnet * .01 + m.learning * .02 + m.forecast * .01 + Object.values(b.traits).reduce((n, x) => n + (x ?? 0) * .05, 0); return Math.round(700 * Math.sqrt(offense * defense) * (1 + utility)); }
+export function combatPower(save) { return equipmentPower(save.equipment); }
 export const powerStatus = (power, recommended) => power / recommended >= 1.2 ? 0 : power / recommended >= .95 ? 1 : power / recommended >= .8 ? 2 : 3;
 export function rollRank(random, rates) { const sample = random(), r = Number.isFinite(sample) ? Math.max(0, Math.min(1 - Number.EPSILON, sample)) : 0; let acc = 0; for (let i = 0; i < rates.length; i++) {
     acc = Math.round((acc + rates[i]) * 1e12) / 1e12;
@@ -11,7 +12,7 @@ export function rollRank(random, rates) { const sample = random(), r = Number.is
         return i;
 } return (rates.length - 1); }
 export function pull(s, count, random) {
-    if (![1, 10].includes(count) || s.gems < count * ECONOMY.pullCost || s.items.length + count > 1000)
+    if (![1, 10].includes(count) || s.gems < count * ECONOMY.pullCost || !s.slotLevels && s.items.length + count > 1000)
         return { state: s, items: [] };
     let state = { ...s, gems: s.gems - count * ECONOMY.pullCost };
     const items = [];
@@ -22,8 +23,8 @@ export function pull(s, count, random) {
         else if (state.pityRare + 1 >= ECONOMY.rarePity)
             rank = Math.max(2, rank);
         const pool = GEAR.filter(d => d.id !== 'field-pack'), def = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
-        items.push(state.nextId);
         state = addItem(state, def.id, rank);
+        items.push(state.slotLevels ? state.items.find(i => i.def === def.id && i.rank === rank).uid : state.nextId - 1);
         state = { ...state, pulls: state.pulls + 1, pityRare: rank >= 2 ? 0 : state.pityRare + 1, pityEpic: rank >= 3 ? 0 : state.pityEpic + 1 };
     }
     return { state, items };

@@ -1,3 +1,4 @@
+import { addStack } from './meta-equipment.js';
 import { rankCopy } from './i18n.js';
 import { ECONOMY } from './economy.js';
 export const SLOTS = ['weapon', 'helmet', 'suit', 'gloves', 'boots', 'pack'];
@@ -47,7 +48,7 @@ export function parseEquipment(raw, maxRank = 5) {
             if (!def || !uid || seen.has(uid))
                 continue;
             seen.add(uid);
-            s.items.push({ uid, def: def.id, rank, level: Math.max(1, integer(i.level, RANKS[rank].max)) });
+            s.items.push({ uid, def: def.id, rank, level: Math.max(1, integer(i.level, RANKS[rank].max)), ...(typeof i.locked === 'boolean' ? { locked: i.locked } : {}), ...(typeof i.seen === 'boolean' ? { seen: i.seen } : {}) });
         }
     s.nextId = Math.max(integer(d.nextId), 1, ...s.items.map(i => i.uid + 1));
     s.equipped = {};
@@ -102,7 +103,8 @@ export function fuseAll(s) { let next = s; for (let step = 0; step < 1000; step+
 } return next; }
 export function dismantle(s, uid) { const item = s.items.find(i => i.uid === uid); if (!item || Object.values(s.equipped).includes(uid))
     return s; const slot = gearDef(item).slot, c = invested(item); return { ...s, gold: s.gold + Math.floor(c.gold * ECONOMY.salvageFraction) + ECONOMY.salvageGold * (item.rank + 1), blueprints: { ...s.blueprints, [slot]: s.blueprints[slot] + Math.floor(c.blueprints * ECONOMY.salvageFraction) + ECONOMY.salvageBlueprints * (item.rank + 1) }, items: s.items.filter(i => i.uid !== uid) }; }
-export function addItem(s, def, rank) { if (s.items.length >= 1000 || !GEAR.some(d => d.id === def))
+export function addItem(s, def, rank) { if (s.slotLevels)
+    return addStack(s, def, rank); if (s.items.length >= 1000 || !GEAR.some(d => d.id === def))
     return s; return { ...s, nextId: s.nextId + 1, items: [...s.items, { uid: s.nextId, def, rank, level: 1 }] }; }
 export function gearBonus(s) {
     const b = { attack: 0, hp: 0, armor: 0, traits: {} };

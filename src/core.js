@@ -1,17 +1,21 @@
+import { completeMetaMigration } from './meta-save.js';
+import { migrateEquipment } from './meta-equipment.js';
+import { emptyRooms } from './base-rooms.js';
+import { awardMetaRun } from './meta-progression.js';
+import { emptyStory, parseStory } from './dialogue/model.js';
 import { crewUnlocked } from './chapters.js';
 import { CREW } from './crew.js';
-import { addItem } from './equipment.js';
 import { canFuse, FUSIONS } from './combat-rules.js';
 import { META, PASSIVES, SHIPS, WAVES, WEAPONS } from './data.js';
 import { emptyEquipment, parseEquipment } from './equipment.js';
-import { awardRun, shardReward, RUN_SKILL_LIMIT } from './economy.js';
+import { shardReward, RUN_SKILL_LIMIT } from './economy.js';
 export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 export const xpNeeded = (level) => level === 1 ? 72 : Math.round(level > 25 ? 2693 + (level - 25) * 35 : 68 + level * 10 + level * level * 3.8);
 export const hpScale = (seconds) => 1 + Math.max(0, seconds) * .003;
 export const waveAt = (seconds) => WAVES[clamp(Math.floor(seconds / 60), 0, 9)];
 export function rng(seed) { let a = seed | 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 export const SAVE_KEY = 'cosmos-survivor.save.v2';
-export function defaultSave() { return { version: 5, crew: 'pip', specialCleared: [], equipment: emptyEquipment(), shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true, telegraphs: 'boss', movement: 'weighted', lessNotices: false }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
+export function defaultSave() { return { story: emptyStory(), version: 6, rooms: emptyRooms(), records: {}, milestones: [], lastMetaLoot: null, migrationRefund: 0, crew: 'pip', specialCleared: [], equipment: migrateEquipment(emptyEquipment()).equipment, shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true, telegraphs: 'boss', movement: 'weighted', lessNotices: false }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
 const int = (v, max = 1e9) => typeof v === 'number' && Number.isFinite(v) ? clamp(Math.floor(v), 0, max) : 0;
 const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) ? v : {};
 export function parseSave(raw) {
@@ -20,11 +24,11 @@ export function parseSave(raw) {
         return { save, warning: false, future: false };
     try {
         const data = record(JSON.parse(raw));
-        if (typeof data.version === 'number' && data.version > 5)
+        if (typeof data.version === 'number' && data.version > 6)
             return { save, warning: true, future: true };
         if (raw.length > 100000)
             throw Error('size');
-        if (data.version !== 2 && data.version !== 3 && data.version !== 4 && data.version !== 5)
+        if (data.version !== 2 && data.version !== 3 && data.version !== 4 && data.version !== 5 && data.version !== 6)
             throw Error('version');
         save.shards = int(data.shards);
         save.runs = int(data.runs);
@@ -32,7 +36,7 @@ export function parseSave(raw) {
         save.kills = int(data.kills);
         save.evolutions = int(data.evolutions);
         save.best = int(data.best, 660);
-        save.unlocked = int(data.unlocked, data.version === 5 ? 7 : 5);
+        save.unlocked = int(data.unlocked, Number(data.version) >= 5 ? 7 : 5);
         if (Array.isArray(data.ships))
             save.ships = SHIPS.filter(s => s.id === 'aster' || data.ships.includes(s.id)).map(s => s.id);
         if (save.ships.includes(data.ship))
@@ -59,43 +63,43 @@ export function parseSave(raw) {
             save.settings.lang = 'en';
         if (Array.isArray(data.settled))
             save.settled = data.settled.filter((v) => typeof v === 'string' && v.length < 100).slice(-100);
-        if (data.version === 3 || data.version === 4 || data.version === 5)
+        if (data.version === 3 || data.version === 4 || data.version === 5 || data.version === 6)
             save.equipment = parseEquipment(data.equipment, data.version === 3 ? 4 : 5);
         else
             save.equipment.cleared = Array.from({ length: save.unlocked }, (_, i) => i);
-        if (data.version !== 5) {
+        if (Number(data.version) < 5) {
             const progressed = save.runs > 0 || save.unlocked > 0 || save.equipment.cleared.length > 0;
             save.equipment.cleared = [...new Set([...(progressed ? [0, 1] : []), ...save.equipment.cleared.filter(n => n < 6).map(n => n + 2)])];
             save.unlocked = progressed ? Math.min(7, save.unlocked + 2) : 0;
         }
         if (CREW.some(c => c.id === data.crew) && crewUnlocked(data.crew, save.equipment.cleared))
             save.crew = data.crew;
-        if (data.version === 5 && Array.isArray(data.specialCleared) && data.specialCleared.includes('village'))
+        if (Number(data.version) >= 5 && Array.isArray(data.specialCleared) && data.specialCleared.includes('village'))
             save.specialCleared = ['village'];
-        return { save, warning: false, future: false };
+        save.story = parseStory(data.story);
+        return { save: completeMetaMigration(save, data), warning: false, future: false };
     }
     catch {
         return { save, warning: true, future: false };
     }
 }
 export const metaCost = (id, level) => META.find(m => m.id === id).cost * (level + 1);
-export function purchase(save, id) { if (!META.some(m => m.id === id))
-    return save; const level = save.meta[id], cost = metaCost(id, level); if (level >= 5 || save.shards < cost)
-    return save; return { ...save, shards: save.shards - cost, meta: { ...save.meta, [id]: level + 1 } }; }
+export function purchase(save, _id) { return save; }
 export function unlockShip(save, id) { const def = SHIPS.find(s => s.id === id); if (!def || save.ships.includes(id) || save.shards < def.cost)
     return save; return { ...save, shards: save.shards - def.cost, ships: [...save.ships, id] }; }
-export function refund(save) { let amount = 0; for (const m of META)
-    amount += m.cost * save.meta[m.id] * (save.meta[m.id] + 1) / 2; return { ...save, shards: save.shards + amount, meta: defaultSave().meta }; }
+export function refund(save) { return save; }
 export const reward = shardReward;
-export function settle(save, result) { if (save.settled.includes(result.id))
-    return save; const r = { ...result, time: int(result.time, 660), kills: int(result.kills), rewardKills: result.rewardKills === undefined ? undefined : int(result.rewardKills), sector: int(result.sector, 7), bosses: int(result.bosses, 5) }; const totals = { runs: save.runs + 1, kills: save.kills + r.kills, evolutions: save.evolutions + int(r.evolutions) }; let seed = 0; for (const c of r.id)
-    seed = Math.imul(seed, 31) + c.charCodeAt(0) | 0; return { ...save, ...totals, equipment: (() => { const firstSpecial = r.special && !save.specialCleared.includes(r.special); let e = awardRun(r.special ? { ...save.equipment, cleared: save.specialCleared.includes(r.special) ? [3] : [] } : save.equipment, r.special ? { ...r, sector: 3 } : r, rng(seed), totals); if (r.special)
-        e = { ...e, cleared: save.equipment.cleared }; if (firstSpecial && r.won) {
-        const uid = e.nextId;
-        e = addItem(e, 'field-pack', 2);
-        if (e.lastLoot)
-            e = { ...e, lastLoot: { ...e.lastLoot, items: [...e.lastLoot.items, ...e.items.filter(i => i.uid === uid)] } };
-    } return e; })(), specialCleared: r.special && r.won ? [...new Set([...save.specialCleared, r.special])] : save.specialCleared, shards: save.shards + int(r.earned), wins: save.wins + Number(r.won), best: Math.max(save.best, r.time), unlocked: r.won && !r.special ? Math.max(save.unlocked, Math.min(7, r.sector + 1)) : save.unlocked, settled: [...save.settled, r.id].slice(-100) }; }
+export function settle(save, result) {
+    if (save.settled.includes(result.id) || !result.id || result.id.length >= 100)
+        return save;
+    const r = { ...result, time: int(result.time, 660), kills: int(result.kills), rewardKills: result.rewardKills === undefined ? undefined : int(result.rewardKills), earned: int(result.earned), evolutions: int(result.evolutions), sector: int(result.sector, 7), bosses: int(result.bosses, 5), difficulty: result.difficulty ?? 'normal' };
+    if (!['easy', 'normal', 'hard'].includes(r.difficulty))
+        return save;
+    let seed = 0;
+    for (const c of r.id)
+        seed = Math.imul(seed, 31) + c.charCodeAt(0) | 0;
+    return awardMetaRun(save, r, rng(seed));
+}
 export function stats(ship, passives, meta) {
     const s = SHIPS.find(s => s.id === ship), p = (key) => passives[key] ?? 0;
     return { maxHp: s.hp * (1 + p('hull') * .2) + meta.hull * 12, speed: s.speed * (1 + p('speed') * .08 + meta.thrust * .04), damage: 1 + p('power') * .12 + meta.output * .06, cooldown: (1 - p('haste') * .07) * (ship === 'vega' ? .85 : 1), area: 1 + p('area') * .12, magnet: 100 * (1 + p('magnet') * .3 + meta.magnet * .15), regen: .18 + p('regen') * .4 + meta.repair * .2, armor: p('armor') + meta.guard + (ship === 'atlas' ? 2 : 0), xp: 1 + meta.learning * .05, crit: p('crit') * .07, pierce: p('pierce'), multi: Math.ceil(p('multi') / 2), duration: 1 + p('duration') * .18, knockback: p('knockback') * 9 };

@@ -94,6 +94,7 @@ export class Simulation {
     chapter;
     shieldReady = 0;
     rescued = false;
+    roomRescue = 0;
     player;
     world = WORLD;
     terrain = [];
@@ -537,9 +538,9 @@ export class Simulation {
         this.areaDamage(p.x, p.y, 200, 40, 20, 'frost');
         this.effect('ripple', p.x, p.y, 200, ELEMENTS.ice.color, .5);
     } if (p.hp <= 0) {
-        if (t.rescue && !this.rescued) {
+        if ((t.rescue || this.roomRescue) && !this.rescued) {
             this.rescued = true;
-            p.hp = p.maxHp * .5;
+            p.hp = p.maxHp * Math.max(.5, this.roomRescue);
             p.invul = 3;
             this.effect('evolve', p.x, p.y, 200, '#f6c454', .8);
         }
@@ -1587,6 +1588,6 @@ export class Simulation {
         this.lastDamageCause = 'abandon';
         this.status = 'lost';
     } }
-    result() { return { id: this.id, sector: this.expedition ? (this.chapterKey === 'village' ? 3 : this.chapterKey) : this.sector, special: this.chapterKey === 'village' ? 'village' : undefined, time: this.time, kills: this.kills, rewardKills: this.expedition ? this.rewardKills : undefined, won: this.status === 'won', earned: this.stress ? 0 : reward(this.time, this.expedition ? this.rewardKills : this.kills, this.bonus, this.status === 'won'), evolutions: this.evolutions, bosses: this.bossRecords.filter(r => r.killed !== null).length }; }
+    result() { return { difficulty: this.difficulty, middleKilled: this.bossRecords.some(r => r.role === 'middle' && r.killed !== null), id: this.id, sector: this.expedition ? (this.chapterKey === 'village' ? 3 : this.chapterKey) : this.sector, special: this.chapterKey === 'village' ? 'village' : undefined, time: this.time, kills: this.kills, rewardKills: this.expedition ? this.rewardKills : undefined, won: this.status === 'won', earned: this.stress ? 0 : reward(this.time, this.expedition ? this.rewardKills : this.kills, this.bonus, this.status === 'won'), evolutions: this.evolutions, bosses: this.bossRecords.filter(r => r.killed !== null).length }; }
     setLoadout(weapons, passives) { this.weapons = weapons.slice(0, 6).map(id => ({ id, level: 8, evolved: false, timer: 0 })); this.passives = { ...passives }; this.player.maxHp = this.attributes.maxHp; this.player.hp = this.player.maxHp; }
 }

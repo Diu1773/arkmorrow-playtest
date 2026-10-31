@@ -22,7 +22,7 @@ export function mountTrials() {
         document.body.classList.add('trial-mode');
         const actions = button('menu', '다른 장면') + button('home', '타이틀');
         if (view === 'menu')
-            app.innerHTML = `<main class="trial-menu panel"><p class="muted">COSMOS / PLAYTEST</p><h1>한 장면 고르기</h1><p>이동만 조작, 공격은 자동. 각 32~34초.</p><div class="trial-choices">${SCENES.map(s => `<button class="btn" data-trial="pick" data-scene="${s.id}"><b>${s.name}</b><span>${s.seconds}초</span><small>${s.hint}</small></button>`).join('')}${button('crew', '탐사대 4명 보기')}</div><p class="muted">짧은 연출 비교용 · 쓰러지지 않음</p>${button('home', '타이틀')}</main>`;
+            app.innerHTML = `<main class="trial-menu panel"><p class="muted">ARKMORROW / PLAYTEST</p><h1>한 장면 고르기</h1><p>이동만 조작, 공격은 자동. 각 32~34초.</p><div class="trial-choices">${SCENES.map(s => `<button class="btn" data-trial="pick" data-scene="${s.id}"><b>${s.name}</b><span>${s.seconds}초</span><small>${s.hint}</small></button>`).join('')}${button('crew', '탐사대 4명 보기')}</div><p class="muted">짧은 연출 비교용 · 쓰러지지 않음</p>${button('home', '타이틀')}</main>`;
         if (view === 'crew')
             app.innerHTML = `<main class="trial-crew panel"><h1>탐사대 격납고</h1><canvas id="crew-walk" width="600" height="160" aria-label="네 탐사대원이 네 방향으로 번갈아 걷는 도트 시안"></canvas><div class="trial-crew-spec">${CREW.map(person => `<article><h2 style="color:${person.color}">${person.name}</h2><p>${person.intro}</p><p>체력 ${person.hp} / 속도 ${person.speed}</p><b>${person.weaponName}</b><p>${person.trait}</p></article>`).join('')}</div><p class="muted">수치와 특징은 시안. 정식 출격에는 아직 적용하지 않음.</p><div class="trial-buttons">${actions}</div></main>`;
         if (view === 'ready')
