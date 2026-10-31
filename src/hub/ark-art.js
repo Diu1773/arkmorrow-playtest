@@ -24,7 +24,6 @@ function earth(c, time, returns) {
     }
 }
 export const boxesOverlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-// Labels use the same measured rectangles for painting and collision checks.
 export function arkNames(c, deck, states, cleared, lang, camera) {
     const l = deck.layout, size = 11, requests = [];
     for (const r of l.rooms) {

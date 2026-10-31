@@ -1,6 +1,37 @@
 import { bossState, bossWorld } from './boss-director.js';
 const cache = new Map();
 const ink = '#171923', glow = '#ffe9b0', core = '#f488a7';
+const textCache = new Map();
+function textImage(text, size, color) {
+    const key = text + '|' + size + '|' + color, old = textCache.get(key);
+    if (old)
+        return old;
+    const canvas = document.createElement('canvas'), g = canvas.getContext('2d'), font = `bold ${size}px Galmuri11, monospace`;
+    g.font = font;
+    canvas.width = Math.ceil(g.measureText(text).width) + 2;
+    canvas.height = Math.ceil(size * 1.3);
+    const h = canvas.getContext('2d');
+    h.font = font;
+    h.textBaseline = 'top';
+    h.fillStyle = color;
+    h.fillText(text, 1, 0);
+    textCache.set(key, canvas);
+    return canvas;
+}
+function pixelLine(c, x0, y0, x1, y1, w) {
+    const n = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))));
+    for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        c.fillRect(Math.round(x0 + (x1 - x0) * t - w / 2), Math.round(y0 + (y1 - y0) * t - w / 2), w, w);
+    }
+}
+function pixelRing(c, cx, cy, r, w) {
+    const n = Math.max(12, Math.ceil(Math.PI * 2 * r));
+    for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2;
+        c.fillRect(Math.round(cx + Math.cos(a) * r - w / 2), Math.round(cy + Math.sin(a) * r - w / 2), w, w);
+    }
+}
 export function bossFrame(d, variant = 2, phase = 0, frame = 0, flash = false) {
     const key = [d.id, variant, phase, frame, flash].join(':');
     if (cache.has(key))
@@ -18,7 +49,6 @@ export function bossFrame(d, variant = 2, phase = 0, frame = 0, flash = false) {
     const eye = (x, y, r = 5) => { oval(x, y, r + 3, r + 3, ink); oval(x, y, r, r, core); rect(x - 2, y - 2, 4, 4, glow); };
     const bob = frame === 1 ? 1 : 0;
     if (variant < 2) {
-        // Two distinct mechanisms per region share materials with the final body.
         const shape = d.shape, second = variant === 1;
         if (shape === 0) {
             if (!second) {
@@ -363,14 +393,42 @@ export function paintBoss(c, _s, e, x, y, unit, reduced = false) {
         return false;
     const image = bossFrame(b.design, b.variant, e.phase, reduced ? 0 : Math.floor(e.age * 5) % 3, e.flash > 0 || e.attackFlash > 0), size = image.width, worldSize = size * (b.variant === 2 ? 2.65 : 3.6);
     const landing = b.intro < .35 ? Math.max(0, (.35 - b.intro) / .35) : 0, offset = reduced ? 0 : landing * (c.canvas.height + size * unit * 3);
-    const width = Math.max(1, Math.round(worldSize * unit)), squash = !reduced && b.intro >= .35 && b.intro < .5 ? .85 : 1;
+    const exposed = b.stun > 0 || b.recovery > 0, width = Math.max(1, Math.round(worldSize * unit)), squash = exposed ? .8 : !reduced && b.intro >= .35 && b.intro < .5 ? .85 : 1;
     c.fillStyle = '#0c101a';
     c.globalAlpha = .45;
     for (let yy = -3; yy <= 3; yy++)
         c.fillRect(Math.round(x - width * .35 + Math.abs(yy) * 2), Math.round(y + width * .3 + yy), Math.round(width * .7 - Math.abs(yy) * 4), 1);
     c.globalAlpha = b.intro < .1 ? 0 : 1;
-    c.drawImage(image, Math.round(x - width / 2), Math.round(y - width / 2 - offset), width, Math.round(width * squash));
+    c.drawImage(image, Math.round(x - width / 2), Math.round(y - width / 2 - offset + (exposed ? width * .15 : 0)), width, Math.round(width * squash));
     c.globalAlpha = 1;
+    if (b.intro < .8)
+        return true;
+    const meter = Math.max(38, Math.round(width * .65)), my = Math.round(y - width * .48 - 10);
+    c.fillStyle = '#111521';
+    c.fillRect(Math.round(x - meter / 2) - 1, my - 1, meter + 2, 6);
+    c.fillStyle = '#574963';
+    c.fillRect(Math.round(x - meter / 2), my, meter, 4);
+    c.fillStyle = b.stun > 0 ? '#fff1a3' : '#ab90ef';
+    c.fillRect(Math.round(x - meter / 2), my, Math.round(meter * (b.stun > 0 ? b.stun / 3.5 : b.stagger / 100)), 4);
+    if (exposed) {
+        const pulse = reduced || Math.floor(e.age * 8) % 2 === 0;
+        c.fillStyle = pulse ? '#fff4c0' : '#e4a15c';
+        for (let dy = -12; dy <= 12; dy++) {
+            const half = Math.round(10 * (1 - Math.abs(dy) / 12));
+            c.fillRect(Math.round(x) - half, Math.round(y) + dy, half * 2 + 1, 1);
+        }
+        c.fillStyle = '#402e4c';
+        c.fillRect(x - 3, y - 3, 6, 6);
+        for (const [dx, dy] of [[-18, 0], [18, 0], [0, -20], [0, 20]])
+            c.fillRect(x + dx - 2, y + dy - 2, 4, 4);
+        if (b.stun > 0)
+            for (let i = 0; i < 3; i++) {
+                const a = i * Math.PI * 2 / 3 + (reduced ? 0 : e.age * 2), sx = x + Math.cos(a) * 22, sy = my - 8 + Math.sin(a) * 5;
+                c.fillStyle = '#fff1a3';
+                c.fillRect(sx - 3, sy - 1, 7, 3);
+                c.fillRect(sx - 1, sy - 3, 3, 7);
+            }
+    }
     return true;
 }
 export function paintBossArena(c, s, X, Y, unit) {
@@ -385,17 +443,12 @@ export function paintBossArena(c, s, X, Y, unit) {
     c.globalAlpha = 1;
     if (phase > 0) {
         c.strokeStyle = phase === 1 ? '#bd82ee' : '#f0a33a';
-        c.lineWidth = 2;
-        c.beginPath();
-        const cut = phase === 1 ? 18 : 42;
-        for (const [i, [x, y]] of [[left + cut, top + 5], [right - cut, top + 5], [right - 5, top + cut], [right - 5, bottom - cut], [right - cut, bottom - 5], [left + cut, bottom - 5], [left + 5, bottom - cut], [left + 5, top + cut]].entries()) {
-            if (i === 0)
-                c.moveTo(x, y);
-            else
-                c.lineTo(x, y);
+        c.fillStyle = c.strokeStyle;
+        const cut = phase === 1 ? 18 : 42, corners = [[left + cut, top + 5], [right - cut, top + 5], [right - 5, top + cut], [right - 5, bottom - cut], [right - cut, bottom - 5], [left + cut, bottom - 5], [left + 5, bottom - cut], [left + 5, top + cut]];
+        for (let i = 0; i < corners.length; i++) {
+            const [x0, y0] = corners[i], [x1, y1] = corners[(i + 1) % corners.length];
+            pixelLine(c, x0, y0, x1, y1, 2);
         }
-        c.closePath();
-        c.stroke();
     }
     c.globalAlpha = .8 * alpha;
     c.fillStyle = '#695375';
@@ -423,10 +476,15 @@ export function paintBossArena(c, s, X, Y, unit) {
             c.fillRect(x, y, n, 2);
     c.globalAlpha = 1;
 }
-export function paintBossThreats(c, s, X, Y, unit) {
+export function paintBossThreats(c, s, X, Y, unit, lang = 'ko', reduced = false) {
     const w = bossWorld(s);
     const arrow = (x, y) => { const xx = X(x), yy = Y(y), cx = c.canvas.width / 2, cy = c.canvas.height / 2; if (xx >= 12 && xx <= cx * 2 - 12 && yy >= 12 && yy <= cy * 2 - 12)
-        return; const dx = xx - cx, dy = yy - cy, k = Math.min((cx - 18) / Math.max(.01, Math.abs(dx)), (cy - 18) / Math.max(.01, Math.abs(dy))), a = Math.atan2(dy, dx); c.save(); c.translate(Math.round(cx + dx * k), Math.round(cy + dy * k)); c.rotate(a); c.fillStyle = '#ffe1a3'; c.beginPath(); c.moveTo(9, 0); c.lineTo(-6, -6); c.lineTo(-6, 6); c.closePath(); c.fill(); c.restore(); };
+        return; const dx = xx - cx, dy = yy - cy, k = Math.min((cx - 18) / Math.max(.01, Math.abs(dx)), (cy - 18) / Math.max(.01, Math.abs(dy))), a = Math.atan2(dy, dx), ox = Math.round(cx + dx * k), oy = Math.round(cy + dy * k), cs = Math.cos(a), sn = Math.sin(a); c.fillStyle = '#ffe1a3'; for (let py = -9; py <= 9; py++)
+        for (let px = -9; px <= 9; px++) {
+            const u = px * cs + py * sn, v = -px * sn + py * cs;
+            if (u >= -6 && u <= 9 && Math.abs(v) <= (9 - u) * 6 / 15)
+                c.fillRect(ox + px, oy + py, 1, 1);
+        } };
     for (const t of w.threats)
         if (t.age >= 0 && t.age < t.warning)
             arrow(t.sourceX, t.sourceY);
@@ -446,12 +504,43 @@ export function paintBossThreats(c, s, X, Y, unit) {
         const elapsed = t.age - t.warning;
         c.fillStyle = '#f28ca2';
         c.globalAlpha = .7;
-        if (t.kind === 'disk') {
+        if (t.kind === 'disk' || t.kind === 'fragment' || t.kind === 'landing') {
             const r = Math.round(t.radius * unit);
             for (let yy = -r; yy <= r; yy += 3) {
-                const dx = Math.sqrt(Math.max(0, r * r - yy * yy));
+                const dx = t.kind === 'fragment' ? r - Math.abs(yy) : Math.sqrt(Math.max(0, r * r - yy * yy));
                 c.fillRect(Math.round(X(t.x) - dx), Y(t.y) + yy, Math.max(1, Math.round(dx * 2)), 2);
             }
+            if (t.kind === 'fragment') {
+                c.fillStyle = '#ffe2aa';
+                const height = (1 - Math.min(1, elapsed / .2)) * 140 * unit;
+                c.fillRect(X(t.x) - 8, Y(t.y) - height - 8, 16, 16);
+            }
+        }
+        if (t.kind === 'grasp') {
+            for (let j = 0; j < 7; j++) {
+                const a = t.angle - .6 + j * .2, r = t.radius * (1 - (elapsed * 1.5 % 1));
+                strip(t.x + Math.cos(a) * r, t.y + Math.sin(a) * r, a + Math.PI, 35, 7);
+            }
+        }
+        if (t.kind === 'decoy') {
+            const e = s.enemies.find(e => e.id === t.owner), b = e && bossState(e);
+            if (b) {
+                const img = bossFrame(b.design, b.variant, e.phase), size = img.width * 2.65 * unit;
+                c.globalAlpha = .25;
+                c.drawImage(img, X(t.x) - size / 2, Y(t.y) - size / 2, size, size);
+            }
+        }
+        if (t.kind === 'safezone' && w.arena) {
+            const a = w.arena, r = (t.radius - elapsed * t.spin) * unit;
+            c.globalAlpha = .35;
+            for (let y = Y(a.y - a.halfH); y < Y(a.y + a.halfH); y += 4) {
+                const dy = y - Y(t.y), gap = Math.abs(dy) < r ? Math.sqrt(r * r - dy * dy) : 0;
+                for (const [lo, hi] of [[X(a.x - a.halfW), X(t.x) - gap], [X(t.x) + gap, X(a.x + a.halfW)]])
+                    c.fillRect(lo, y, Math.max(0, hi - lo), 2);
+            }
+            c.globalAlpha = 1;
+            c.fillStyle = '#ffe1a3';
+            pixelRing(c, X(t.x), Y(t.y), r, 2);
         }
         if (t.kind === 'beam')
             strip(t.x, t.y, t.angle + t.spin * elapsed, t.length, t.width);
@@ -477,6 +566,20 @@ export function paintBossThreats(c, s, X, Y, unit) {
         }
         c.globalAlpha = 1;
     }
+    for (const e of s.enemies) {
+        const b = bossState(e);
+        if (!b || b.stun > 0 || b.recovery > 0)
+            continue;
+        const escorts = s.enemies.filter(n => n.hp > 0 && n.escort && n.leader === e.id);
+        if (!escorts.length)
+            continue;
+        c.fillStyle = '#9ccdf2';
+        c.globalAlpha = .7;
+        pixelRing(c, X(e.x), Y(e.y), e.r * 2.2 * unit, 2);
+        for (const n of escorts)
+            pixelLine(c, X(e.x), Y(e.y), X(n.x), Y(n.y), 2);
+        c.globalAlpha = 1;
+    }
     for (const r of w.remains) {
         const image = bossFrame(r.design, r.variant, 2), size = image.width * (r.variant === 2 ? 2.65 : 3.6) * unit;
         c.globalAlpha = Math.max(0, 1 - r.age / 1.6);
@@ -485,5 +588,21 @@ export function paintBossThreats(c, s, X, Y, unit) {
             c.drawImage(image, col * image.width / 3, row * image.height / 2, image.width / 3, image.height / 2, Math.round(X(r.x) - size / 2 + col * size / 3 + dx), Math.round(Y(r.y) - size / 2 + row * size / 2 + dy), Math.ceil(size / 3), Math.ceil(size / 2));
         }
         c.globalAlpha = 1;
+    }
+    if (w.counterTime > 0 || w.hintTime > 0) {
+        const counter = w.counterTime > 0, text = counter ? (lang === 'en' ? 'COUNTER!' : '반격!') : (lang === 'en' ? 'Dash in to counter!' : '파고들어 반격!'), x = c.canvas.width / 2, y = Math.max(42, c.canvas.height * .22);
+        c.save();
+        const label = textImage(text, counter ? 26 : 14, counter ? '#fff1a3' : '#d4e8ff'), width = label.width + 24;
+        c.fillStyle = '#141624';
+        c.globalAlpha = .9;
+        c.fillRect(x - width / 2, y - 28, width, 38);
+        c.globalAlpha = 1;
+        c.drawImage(label, Math.round(x - label.width / 2), Math.round(y - label.height + 6));
+        if (counter && !reduced && w.counterTime > .9) {
+            c.globalAlpha = .12;
+            c.fillStyle = '#fff1a3';
+            c.fillRect(0, 0, c.canvas.width, c.canvas.height);
+        }
+        c.restore();
     }
 }

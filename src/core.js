@@ -17,7 +17,7 @@ export const hpScale = (seconds) => 1 + Math.max(0, seconds) * .003;
 export const waveAt = (seconds) => WAVES[clamp(Math.floor(seconds / 60), 0, 9)];
 export function rng(seed) { let a = seed | 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 export const SAVE_KEY = 'cosmos-survivor.save.v2';
-export function defaultSave() { return { story: emptyStory(), version: 6, rooms: emptyRooms(), records: {}, milestones: [], lastMetaLoot: null, migrationRefund: 0, crew: 'pip', specialCleared: [], equipment: migrateEquipment(emptyEquipment()).equipment, shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true, telegraphs: 'boss', movement: 'weighted', lessNotices: false, bindings: defaultBindings() }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
+export function defaultSave() { return { scarf: false, story: emptyStory(), version: 6, rooms: emptyRooms(), records: {}, milestones: [], lastMetaLoot: null, migrationRefund: 0, crew: 'pip', specialCleared: [], equipment: migrateEquipment(emptyEquipment()).equipment, shards: 0, meta: { output: 0, hull: 0, thrust: 0, magnet: 0, repair: 0, forecast: 0, learning: 0, guard: 0 }, settings: { textScale: 1, uiScale: 1, colorAssist: 'off', lang: 'ko', volume: .6, music: .25, sfx: .65, shake: .5, reduced: false, numbers: true, telegraphs: 'boss', movement: 'weighted', lessNotices: false, bindings: defaultBindings() }, ship: 'aster', ships: ['aster'], unlocked: 0, runs: 0, wins: 0, kills: 0, evolutions: 0, best: 0, settled: [] }; }
 const int = (v, max = 1e9) => typeof v === 'number' && Number.isFinite(v) ? clamp(Math.floor(v), 0, max) : 0;
 const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) ? v : {};
 export function parseSave(raw) {
@@ -62,6 +62,13 @@ export function parseSave(raw) {
             save.settings.lessNotices = true;
         if (settings.movement === 'instant')
             save.settings.movement = 'instant';
+        for (const [key, values] of [['textScale', [1, 1.15, 1.3]], ['uiScale', [.9, 1, 1.1]]]) {
+            const value = settings[key];
+            if (typeof value === 'number' && values.some(n => n === value))
+                save.settings[key] = value;
+        }
+        if (settings.colorAssist === 'contrast')
+            save.settings.colorAssist = 'contrast';
         if (settings.lang === 'en')
             save.settings.lang = 'en';
         if (Array.isArray(data.settled))

@@ -96,7 +96,6 @@ export function deckArt(canvas, deck, cleared, returns, time, lang, camera, room
     }
     for (const x of [150, 465])
         panel(c, x, 0, 12, 63, '#455e6c');
-    // Floor strips lead from the capsule to the hatch.
     for (let x = 368; x < 496; x += 16)
         rect(c, x, 280, 8, 2, '#8b8166');
     for (let y = 286; y < 360; y += 16)

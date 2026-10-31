@@ -6,15 +6,15 @@ const gold = ['#34334b', '#896448', '#d6a553', '#ffe1a3'];
 const coral = ['#372e4c', '#8b4f6c', '#d57b86', '#ffceae'];
 const blue = ['#292b48', '#495f9b', '#859ad6', '#d3d8f2'];
 export const BOSS_DESIGNS = [
-    { id: 'launch', size: 96, shape: 0, colors: iron, moves: ['fan', 'rebound', 'charge', 'mines', 'summon', 'sweep'], hp: [17500, 61000, 187500] },
-    { id: 'atmosphere', size: 112, shape: 1, colors: cloud, moves: ['pulse', 'rain', 'sweep', 'spiral', 'corridor', 'rebound'], hp: [13250, 35000, 104000] },
-    { id: 'village', size: 96, shape: 2, colors: earth, moves: ['charge', 'mines', 'fan', 'summon', 'pulse', 'corridor'], hp: [44000, 110000, 345000] },
-    { id: 'nebula', size: 96, shape: 3, colors: violet, moves: ['fan', 'spiral', 'mines', 'rebound', 'sweep', 'corridor'], hp: [33300, 119700, 246000] },
-    { id: 'open-cluster', size: 96, shape: 4, colors: gold, moves: ['summon', 'fan', 'rebound', 'rain', 'charge', 'corridor'], hp: [22000, 67500, 266000] },
-    { id: 'globular', size: 112, shape: 5, colors: coral, moves: ['pulse', 'spiral', 'mines', 'fan', 'corridor', 'rebound'], hp: [34000, 140000, 380000] },
-    { id: 'galaxy', size: 128, shape: 6, colors: blue, moves: ['sweep', 'fan', 'charge', 'rain', 'rebound', 'corridor'], hp: [48000, 144000, 475000] },
-    { id: 'outer', size: 112, shape: 7, colors: violet, moves: ['rebound', 'rain', 'fan', 'spiral', 'summon', 'sweep'], hp: [91000, 219000, 713000] },
-    { id: 'expansion', size: 128, shape: 8, colors: coral, moves: ['corridor', 'pulse', 'rain', 'sweep', 'spiral', 'rebound'], hp: [103500, 204000, 700000] },
+    { id: 'launch', size: 96, shape: 0, colors: iron, moves: ['fan', 'charge', 'mines', 'summon', 'sweep', 'collapse'], hp: [17500, 61000, 187500] },
+    { id: 'atmosphere', size: 112, shape: 1, colors: cloud, moves: ['pulse', 'sweep', 'debris', 'grasp', 'ambush', 'collapse'], hp: [13250, 35000, 104000] },
+    { id: 'village', size: 96, shape: 2, colors: earth, moves: ['charge', 'mines', 'debris', 'summon', 'grasp', 'collapse'], hp: [44000, 110000, 345000] },
+    { id: 'nebula', size: 96, shape: 3, colors: violet, moves: ['fan', 'ambush', 'mines', 'grasp', 'feint', 'sweep'], hp: [33300, 119700, 246000] },
+    { id: 'open-cluster', size: 96, shape: 4, colors: gold, moves: ['summon', 'charge', 'debris', 'fan', 'grasp', 'collapse'], hp: [22000, 67500, 266000] },
+    { id: 'globular', size: 112, shape: 5, colors: coral, moves: ['pulse', 'grasp', 'mines', 'charge', 'collapse', 'debris'], hp: [34000, 140000, 380000] },
+    { id: 'galaxy', size: 128, shape: 6, colors: blue, moves: ['sweep', 'charge', 'fan', 'debris', 'grasp', 'collapse'], hp: [48000, 144000, 475000] },
+    { id: 'outer', size: 112, shape: 7, colors: violet, moves: ['rebound', 'feint', 'ambush', 'summon', 'sweep', 'collapse'], hp: [91000, 219000, 713000] },
+    { id: 'expansion', size: 128, shape: 8, colors: coral, moves: ['corridor', 'charge', 'debris', 'sweep', 'grasp', 'collapse'], hp: [103500, 204000, 700000] },
 ];
 export function bossDesign(id) { return BOSS_DESIGNS.find(b => b.id === id) ?? BOSS_DESIGNS[3]; }
 export const DUEL_ENCOUNTERS = [

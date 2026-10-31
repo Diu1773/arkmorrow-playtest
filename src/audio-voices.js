@@ -1,7 +1,7 @@
 import { soundDuration, VARIANTS } from './audio-score.js';
 export const VOICE_LIMIT = 12;
 export function soundRule(id) {
-    const important = ['warning', 'hurt', 'level', 'evolve', 'chest', 'boss', 'bossIncoming', 'clear', 'down', 'resonance', 'heal'].includes(id), tiny = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'kill', 'pickup', 'crystal', 'air', 'blast', 'wave', 'spark', 'gravity', 'ice', 'field', 'prepare', 'dash', 'footgrass', 'footstone', 'footmetal', 'footwater', 'charge', 'tail'].includes(id);
+    const important = ['counter', 'warning', 'hurt', 'level', 'evolve', 'chest', 'boss', 'bossIncoming', 'clear', 'down', 'resonance', 'heal'].includes(id), tiny = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'kill', 'pickup', 'crystal', 'air', 'blast', 'wave', 'spark', 'gravity', 'ice', 'field', 'prepare', 'dash', 'footgrass', 'footstone', 'footmetal', 'footwater', 'charge', 'tail'].includes(id);
     const hit = ['pulse', 'orbit', 'missile', 'chain', 'laser', 'mine', 'fan', 'nova', 'blast', 'wave', 'spark', 'gravity', 'ice', 'field'].includes(id);
     return { limit: hit || id.startsWith('foot') || id === 'hurt' || id === 'lowHealth' ? 1 : 2, interval: hit ? .065 : id === 'lowHealth' ? 1.2 : important ? .15 : id === 'pickup' || id === 'crystal' ? .06 : .08, priority: id === 'hurt' ? 7 : id === 'down' ? 8 : important ? (id === 'warning' ? 4 : 5) : id === 'prepare' ? 2 : tiny ? 1 : 3, tiny, hit };
 }
@@ -35,7 +35,6 @@ export class VoiceManager {
         }
         let duck = false;
         const hits = [...grouped.values()].filter(r => soundRule(r.id).hit).sort((a, b) => (b.count ?? 1) - (a.count ?? 1) || (this.last.get(a.id) ?? -1e9) - (this.last.get(b.id) ?? -1e9));
-        // Alternate two short accents per cluster, with one shared retrigger clock.
         const allowedHits = new Set(now - this.hitAt >= .065 - 1e-8 ? hits.slice(0, 2).map(r => r.id) : []);
         for (const r of [...grouped.values()].sort((a, b) => soundRule(b.id).priority - soundRule(a.id).priority)) {
             const rule = soundRule(r.id);

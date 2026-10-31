@@ -1,6 +1,6 @@
 import { DASH, SKILLS, skillDef, skillStats } from './combat-catalog.js';
 import { impact, gravityMultiplier } from './battle.js';
-import { arenaPoint, constrainArena, interruptBoss } from './boss-director.js';
+import { arenaPoint, constrainArena, interruptBoss, tryBossCounter, reflectBossBullet } from './boss-director.js';
 const distance = (x, y, ax, ay, bx, by) => {
     const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
     return Math.hypot(x - ax - dx * t, y - ay - dy * t);
@@ -186,9 +186,9 @@ export function updateSkills(sim, dt, input) {
         if (f.id === 'reflect')
             for (let j = sim.bullets.length - 1; j >= 0; j--) {
                 const b = sim.bullets[j];
-                if (Math.hypot(b.x - p.x, b.y - p.y) > f.radius)
+                if (b.life <= 0 || Math.hypot(b.x - p.x, b.y - p.y) > f.radius)
                     continue;
-                const a = Math.atan2(-b.vy, -b.vx);
+                const owner = reflectBossBullet(sim, b), a = owner ? Math.atan2(owner.y - b.y, owner.x - b.x) : Math.atan2(-b.vy, -b.vx);
                 sim.fire(b.x, b.y, a, Math.max(350, Math.hypot(b.vx, b.vy)), f.damage, false, 'pulse', def.color, 2, sim.attributes.pierce, 'tether');
                 sim.bulletPool.remove(j);
                 sim.reflections++;
@@ -248,4 +248,5 @@ export function startDash(sim, x, y) {
     p.dashX = len ? x / len : Math.cos(p.angle);
     p.dashY = len ? y / len : Math.sin(p.angle);
     sim.dashUses++;
+    tryBossCounter(sim, p.dashX, p.dashY);
 }

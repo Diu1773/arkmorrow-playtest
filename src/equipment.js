@@ -83,7 +83,6 @@ export function fusionGroup(s, uid) {
     const available = s.items.filter(i => i.uid !== uid && i.rank === base.rank && !Object.values(s.equipped).includes(i.uid));
     const same = available.filter(i => i.def === base.def).sort((a, b) => a.level - b.level || a.uid - b.uid);
     const filler = base.rank === 3 ? available.filter(i => i.def !== base.def && gearDef(i).slot === gearDef(base).slot).sort((a, b) => a.level - b.level || a.uid - b.uid) : [];
-    // One matching duplicate is retained when substituting an epic material.
     const materials = same.length >= 2 ? same.slice(0, 2) : same.length === 1 && filler.length ? [same[0], filler[0]] : [];
     return materials.length === 2 ? [base, ...materials] : [];
 }

@@ -47,6 +47,28 @@ function raster(q, unit) {
                         inside &&= edge >= 0 && d >= 4;
                         border ||= edge >= 0 && d * Math.sin(edge) < 1;
                     }
+                    if (q.kind === 'claw') {
+                        const edge = q.gapWidth / 2 - delta(a, angle);
+                        inside &&= edge >= 0 && d >= 4;
+                        border ||= edge >= 0 && d * Math.sin(edge) < 2 || d > radius - 4;
+                        inside &&= border || Math.abs(Math.sin(a * 7)) < .12;
+                    }
+                    if (q.kind === 'fragment') {
+                        inside = Math.abs(x) + Math.abs(y) < radius;
+                        border = radius - Math.abs(x) - Math.abs(y) < 2 || Math.abs(x) < 1 || Math.abs(y) < 1;
+                    }
+                    if (q.kind === 'landing') {
+                        inside &&= d > radius - 4 || Math.abs(x) < 2 || Math.abs(y) < 2;
+                        border = inside;
+                    }
+                    if (q.kind === 'decoy') {
+                        inside &&= d > radius - 3 && (Math.floor(a * 8) % 2 === 0);
+                        border = inside;
+                    }
+                    if (q.kind === 'safezone') {
+                        inside = d < radius && d > radius - 4;
+                        border = inside;
+                    }
                 }
             }
             if (!inside)

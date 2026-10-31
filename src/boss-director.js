@@ -3,18 +3,59 @@ const TAU = Math.PI * 2;
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const worlds = new WeakMap(), states = new WeakMap();
 const homing = new WeakMap(), rebounds = new WeakMap();
+const bulletOwners = new WeakMap();
 const elites = new WeakMap();
-export const BOSS_TELLS = { fan: .45, spiral: .5, rebound: .5, charge: .5, mines: .55, sweep: .9, rain: .55, corridor: .95, summon: .6, pulse: .55 };
+export const BOSS_TELLS = { fan: .45, spiral: .5, rebound: .5, charge: .5, mines: .55, sweep: .9, rain: .55, corridor: .95, summon: .6, pulse: .55, grasp: .6, collapse: .95, debris: .55, feint: .6, ambush: .6 };
+export const counterWindow = (s) => s.difficulty === 'easy' ? .25 : s.difficulty === 'hard' ? .15 : .2;
+export const recoveryDuration = (move) => ['charge', 'sweep', 'corridor', 'collapse', 'summon', 'grasp', 'ambush', 'feint', 'debris', 'mines', 'rain', 'pulse'].includes(move) ? 1.25 : 1;
+export function bossDamageMultiplier(s, e) { const b = states.get(e); if (!b)
+    return 1; if (b.stun > 0)
+    return 1.8; if (b.recovery > 0)
+    return 1.35; return s.enemies.some(n => n.hp > 0 && n.escort && n.leader === e.id) ? .35 : 1; }
+function clearBossAttack(s, e) { const w = bossWorld(s), b = states.get(e); w.threats = w.threats.filter(t => t.owner !== e.id); for (const shot of s.bullets)
+    if (bulletOwners.get(shot) === e.id)
+        shot.life = 0; b.dash = 0; b.active = false; e.warnTime = 0; }
+export function addBossStagger(s, e, amount) { const b = states.get(e); if (!b || e.hp <= 0 || b.stun > 0 || amount <= 0)
+    return; b.stagger = Math.min(100, b.stagger + amount); if (b.stagger < 100)
+    return; b.stagger = 0; b.stun = 3.5; b.recovery = 0; b.stuns++; bossWorld(s).stats.stuns++; clearBossAttack(s, e); b.next = 3.8; s.effect('evolve', e.x, e.y, e.r * 2, '#fff1a3', .6); s.emit('impact', e.x, e.y, 1); }
+export function recordBossDamage(s, e, damage) { const b = states.get(e); if (!b || damage <= 0)
+    return; if (b.stun > 0 || b.recovery > 0) {
+    b.openHits++;
+    bossWorld(s).stats.openHits++;
+} addBossStagger(s, e, damage / e.maxHp * 140); }
+export function bossPatternContact(s, bullet) { const owner = bullet ? bulletOwners.get(bullet) : bossWorld(s).arena?.owner, e = s.enemies.find(e => e.id === owner), b = e && states.get(e); if (b && s.player.dashTime <= 0)
+    b.failed = true; }
+export function reflectBossBullet(s, bullet) { const e = s.enemies.find(e => e.id === bulletOwners.get(bullet) && e.hp > 0), b = e && states.get(e); if (!e || !b)
+    return; bulletOwners.delete(bullet); b.reflections++; bossWorld(s).stats.reflections++; addBossStagger(s, e, 8); return e; }
+export function counterTarget(s, x, y) {
+    const p = s.player, len = Math.hypot(x, y);
+    if (len < .01)
+        return;
+    const dx = x / len, dy = y / len;
+    for (const t of bossWorld(s).threats) {
+        if (!['charge', 'grasp', 'landing'].includes(t.kind) || t.released || t.age < t.warning - counterWindow(s) - 1e-8 || t.age >= t.warning)
+            continue;
+        const e = s.enemies.find(e => e.id === t.owner && e.hp > 0), b = e && states.get(e);
+        if (!e || !b || e.stageGuard > 0 || b.stun > 0 || b.recovery > 0)
+            continue;
+        const tx = t.kind === 'landing' ? t.x : e.x, ty = t.kind === 'landing' ? t.y : e.y, ex = tx - p.x, ey = ty - p.y, d = Math.hypot(ex, ey), along = ex * dx + ey * dy, across = Math.abs(ex * dy - ey * dx);
+        const attackAlong = (p.x - t.x) * Math.cos(t.angle) + (p.y - t.y) * Math.sin(t.angle), inAttack = t.kind === 'charge' ? Math.abs((p.x - t.x) * Math.sin(t.angle) - (p.y - t.y) * Math.cos(t.angle)) < t.width / 2 + p.r && attackAlong >= 0 && attackAlong <= t.length + p.r : Math.hypot(p.x - t.x, p.y - t.y) < t.radius + p.r && (t.kind !== 'grasp' || angleDistance(Math.atan2(p.y - t.y, p.x - t.x), t.angle) < .65);
+        if (inAttack && d < 220 && along > 0 && across < e.r + p.r && along / d > .65)
+            return e;
+    }
+}
+export function tryBossCounter(s, x, y) { const e = counterTarget(s, x, y); if (!e)
+    return false; const b = states.get(e), w = bossWorld(s); clearBossAttack(s, e); b.recovery = 1.25; b.next = 1.5; b.counters++; w.stats.counters++; w.counterTime = 1; w.hintTime = 0; s.hit(e, e.maxHp * .055 / 1.35, 'pulse', false); addBossStagger(s, e, 42); s.hitStop = Math.max(s.hitStop, .11); s.shake = Math.max(s.shake, 9); s.effect('shatter', e.x, e.y, e.r * 2.5, '#fff0a3', .45); s.emit('counter', e.x, e.y); return true; }
 export const bossTell = (move, phase, tell) => Math.max(.35, BOSS_TELLS[move] - .025 * phase) * tell;
 export function interruptBoss(s, e) { const b = states.get(e); if (!b || b.breakCD > 0 || e.warnTime <= 0)
-    return false; bossWorld(s).threats = bossWorld(s).threats.filter(t => t.owner !== e.id || t.released); e.warnTime = 0; b.next = .65; b.breakCD = 8; return true; }
+    return false; bossWorld(s).threats = bossWorld(s).threats.filter(t => t.owner !== e.id || t.released); e.warnTime = 0; b.active = false; b.recovery = 1.25; b.next = 1.5; b.breakCD = 8; return true; }
 export function skipBossIntro(s) { for (const e of s.enemies) {
     const b = states.get(e);
     if (b && b.intro < .8)
         b.intro = .8;
 } s.hitStop = 0; }
 export function bossWorld(s) { let w = worlds.get(s); if (!w) {
-    w = { arena: null, threats: [], remains: [], bounces: 0, history: [] };
+    w = { arena: null, threats: [], remains: [], bounces: 0, history: [], hint: false, hintTime: 0, counterTime: 0, stats: { counters: 0, dodges: 0, stuns: 0, reflections: 0, openHits: 0 } };
     worlds.set(s, w);
 } return w; }
 export const bossState = (e) => states.get(e);
@@ -88,7 +129,7 @@ export function setupBoss(s, e) {
     e.timer = 1.1;
     e.stages = 3;
     s.hitStop = Math.max(s.hitStop, .12);
-    states.set(e, { design, variant, recent: [], casts: 0, phase: 0, intro: 0, dash: 0, heading: 0, next: 1.1, move: null, breakCD: 0 });
+    states.set(e, { design, variant, recent: [], casts: 0, phase: 0, intro: 0, dash: 0, heading: 0, next: 1.1, move: null, breakCD: 0, stagger: 0, stun: 0, recovery: 0, active: false, failed: false, counters: 0, dodges: 0, stuns: 0, reflections: 0, openHits: 0 });
     const w = bossWorld(s), halfW = clamp(s.viewWidth * .55, 440, 1100), halfH = clamp(s.viewHeight * .55, 350, 1100);
     const x = clamp(s.player.x, halfW + 35, 4765 - halfW), y = clamp(s.player.y, halfH + 35, 3165 - halfH);
     w.arena = { x, y, halfW, halfH, age: 0, release: -1, owner: e.id };
@@ -98,7 +139,6 @@ export function setupBoss(s, e) {
     s.shotPool.active.length = 0;
     s.swarmUntil = 0;
     s.arrivalSites = [];
-    // An empty landing area keeps terrain and existing enemies out of the first warning.
     s.obstacles = s.obstacles.filter(o => Math.abs(o.x - x) > halfW + o.r || Math.abs(o.y - y) > halfH + o.r);
     for (const o of s.props)
         if (Math.abs(o.x - x) < halfW + o.r && Math.abs(o.y - y) < halfH + o.r)
@@ -122,6 +162,9 @@ export function castBossMove(s, e, move) {
     const b = states.get(e), w = bossWorld(s), a = w.arena, p = s.player, angle = Math.atan2(p.y - e.y, p.x - e.x), damage = e.damage * s.mode.damage, phase = e.phase;
     b.move = move;
     b.casts++;
+    b.active = true;
+    b.failed = false;
+    b.recovery = 0;
     w.history.push({ id: e.id, move, phase, at: s.time });
     if (w.history.length > 200)
         w.history.shift();
@@ -137,19 +180,41 @@ export function castBossMove(s, e, move) {
         threat('charge', { width: e.r * 2, length: Math.min(430, Math.hypot(p.x - e.x, p.y - e.y) + 100), duration: .62 });
     if (move === 'sweep')
         threat('beam', { angle: angle - .4, width: 26, duration: 1.5, spin: -.75 });
+    if (move === 'grasp')
+        threat('grasp', { radius: 270, duration: 1.1, width: 1.2 });
+    if (move === 'collapse')
+        threat('safezone', { x: clamp(p.x, a.x - a.halfW + 210, a.x + a.halfW - 210), y: clamp(p.y, a.y - a.halfH + 210, a.y + a.halfH - 210), radius: 205, duration: 1.8, spin: 22 });
+    if (move === 'debris')
+        for (let i = 0; i < 5; i++)
+            threat('fragment', { x: clamp(p.x + (i - 2) * 100, a.x - a.halfW + 65, a.x + a.halfW - 65), y: clamp(p.y + Math.sin(i * 1.8) * 100, a.y - a.halfH + 65, a.y + a.halfH - 65), radius: 60, age: -i * .16, duration: .25 });
+    if (move === 'ambush') {
+        const point = arenaPoint(s, { x: p.x + Math.cos(angle) * 70, y: p.y + Math.sin(angle) * 70 }, 95);
+        threat('landing', { ...point, radius: 100, duration: .28 });
+    }
+    if (move === 'feint') {
+        for (const sign of [-1, 1]) {
+            const point = arenaPoint(s, { x: p.x - Math.sin(angle) * sign * 170, y: p.y + Math.cos(angle) * sign * 170 }, 100);
+            threat(sign < 0 ? 'decoy' : 'landing', { ...point, radius: 105, duration: .3, damage: sign < 0 ? 0 : damage });
+        }
+    }
     if (move === 'mines' || move === 'rain') {
         const count = move === 'rain' ? 5 : 3;
         const escape = Math.atan2(a.y - p.y, a.x - p.x), side = escape + Math.PI / 2;
         for (let i = 0; i < count; i++) {
             const offset = i === 0 ? 0 : i === 1 ? 190 : -190, dx = move === 'rain' ? (i - 2) * 100 : Math.cos(side) * offset, dy = move === 'rain' ? Math.sin(i * 1.6) * 75 : Math.sin(side) * offset;
-            threat('disk', { x: clamp(p.x + dx, a.x - a.halfW + 25, a.x + a.halfW - 25), y: clamp(p.y + dy, a.y - a.halfH + 25, a.y + a.halfH - 25), radius: move === 'rain' ? 62 : 80, age: -i * .1, duration: .32 });
+            threat('disk', { x: clamp(p.x + dx, a.x - a.halfW + 25, a.x + a.halfW - 25), y: clamp(p.y + dy, a.y - a.halfH + 25, a.y + a.halfH - 25), radius: move === 'rain' ? 62 : 80, age: -i * .18, duration: .32 });
         }
     }
     if (move === 'corridor')
         threat('corridor', { x: a.x, y: clamp(p.y, a.y - a.halfH + 220, a.y + a.halfH - 220), width: Math.min(230, a.halfH * .6), radius: Math.min(105, a.halfH * .25), duration: 2.4, spin: .75, angle: 0 });
     if (move === 'summon')
         threat('summon', { x: a.x, y: a.y, radius: Math.min(a.halfW, a.halfH) - 110, duration: .02, angle: 0 });
-    b.next = Math.max(...w.threats.filter(t => t.owner === e.id).map(t => t.warning + t.duration - t.age)) + (b.casts % 2 === 1 ? .22 : .65) - phase * .06;
+    if (['charge', 'grasp', 'ambush', 'feint'].includes(move) && !w.hint) {
+        w.hint = true;
+        w.hintTime = 2;
+    }
+    const tail = move === 'rebound' ? 4.5 : ['fan', 'spiral', 'rain'].includes(move) ? 3.4 : move === 'charge' ? 2.7 : 0;
+    b.next = Math.max(...w.threats.filter(t => t.owner === e.id).map(t => t.warning + t.duration - t.age)) + tail + recoveryDuration(move);
     e.timer = b.next;
 }
 export function updateBoss(s, e, dt) {
@@ -170,16 +235,34 @@ export function updateBoss(s, e, dt) {
     }
     if (e.phase !== b.phase) {
         b.phase = e.phase;
-        b.next = .9;
+        b.next = Math.max(.9, b.stun + .3);
         b.move = null;
-        bossWorld(s).threats = bossWorld(s).threats.filter(t => t.owner !== e.id);
+        clearBossAttack(s, e);
+        b.recovery = 0;
         s.bulletPool.active.length = 0;
     }
-    if (e.stageGuard > 0)
+    const stunned = b.stun > 0;
+    b.stun = Math.max(0, b.stun - dt);
+    if (e.stageGuard > 0 || stunned)
         return true;
     const arena = bossWorld(s).arena;
     if (!arena)
         return true;
+    if (b.active && b.move && b.next <= recoveryDuration(b.move)) {
+        const perfect = !b.failed;
+        clearBossAttack(s, e);
+        b.recovery = recoveryDuration(b.move);
+        if (perfect) {
+            b.dodges++;
+            bossWorld(s).stats.dodges++;
+            addBossStagger(s, e, 12);
+        }
+        return true;
+    }
+    if (b.recovery > 0) {
+        b.recovery = Math.max(0, b.recovery - dt);
+        return true;
+    }
     if (b.dash > 0) {
         const travel = Math.min(b.dash, 720 * dt);
         b.dash -= travel;
@@ -195,8 +278,10 @@ export function updateBoss(s, e, dt) {
     e.y = clamp(e.y, arena.y - arena.halfH + e.r + 20, arena.y + arena.halfH - e.r - 20);
     if (b.next <= 0 && b.dash <= 0)
         castBossMove(s, e, chooseBossMove(s, e));
-    if (Math.hypot(s.player.x - e.x, s.player.y - e.y) < e.r + s.player.r)
+    if (Math.hypot(s.player.x - e.x, s.player.y - e.y) < e.r + s.player.r) {
+        bossPatternContact(s);
         hurtBoss(s, e.damage, 'boss:' + e.bossArt);
+    }
     return true;
 }
 export function arenaContains(a, x, y, r = 0) { return Math.abs(x - a.x) <= a.halfW - r && Math.abs(y - a.y) <= a.halfH - r; }
@@ -230,7 +315,7 @@ export function bounceArena(s, b, enemy) {
     if (enemy)
         bossWorld(s).bounces++;
 }
-export function resetBossBullet(b) { homing.delete(b); rebounds.delete(b); }
+export function resetBossBullet(b) { homing.delete(b); rebounds.delete(b); bulletOwners.delete(b); }
 export function steerBossBullet(s, b, dt) { const turn = homing.get(b); if (turn === undefined || b.age > 1.1)
     return; const heading = Math.atan2(b.vy, b.vx), target = Math.atan2(s.player.y - b.y, s.player.x - b.x), delta = Math.atan2(Math.sin(target - heading), Math.cos(target - heading)), a = heading + clamp(delta, -turn * dt, turn * dt), speed = Math.hypot(b.vx, b.vy); b.vx = Math.cos(a) * speed; b.vy = Math.sin(a) * speed; }
 const angleDistance = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
@@ -239,8 +324,12 @@ export function threatHits(t, x, y, r, age = t.age) {
     if (elapsed < 0 || elapsed > t.duration)
         return false;
     const dx = x - t.x, dy = y - t.y;
-    if (t.kind === 'disk')
+    if (t.kind === 'disk' || t.kind === 'fragment' || t.kind === 'landing')
         return Math.hypot(dx, dy) < t.radius + r;
+    if (t.kind === 'grasp')
+        return Math.hypot(dx, dy) < t.radius + r && angleDistance(Math.atan2(dy, dx), t.angle) < .6 + r / Math.max(30, Math.hypot(dx, dy));
+    if (t.kind === 'safezone')
+        return Math.hypot(dx, dy) > t.radius - elapsed * t.spin - r;
     if (t.kind === 'beam') {
         const a = t.angle + t.spin * elapsed, along = dx * Math.cos(a) + dy * Math.sin(a), across = -dx * Math.sin(a) + dy * Math.cos(a);
         return along >= -r && along < t.length + r && Math.abs(across) < t.width / 2 + r;
@@ -260,8 +349,11 @@ function release(s, t) {
     if (!e || e.hp <= 0)
         return;
     e.attackFlash = 1 / 30;
-    const shot = (angle, speed, kind = 'pulse', x = t.x, y = t.y) => { const damage = Math.min(t.damage, s.player.maxHp * .24 / ((s.chapter?.damage ?? 1) * s.chaos.incoming)), b = s.fire(x, y, angle, speed, damage, true, kind, '#ff80a2', kind === 'ricochet' ? 4.5 : 3.4); if (b && t.move === 'rain')
-        homing.set(b, .65); return b; };
+    const shot = (angle, speed, kind = 'pulse', x = t.x, y = t.y) => { const damage = Math.min(t.damage, s.player.maxHp * .24 / ((s.chapter?.damage ?? 1) * s.chaos.incoming)), b = s.fire(x, y, angle, speed, damage, true, kind, '#ff80a2', kind === 'ricochet' ? 4.5 : 3.4); if (b) {
+        bulletOwners.set(b, e.id);
+        if (t.move === 'rain')
+            homing.set(b, .65);
+    } return b; };
     const speed = (270 + t.phase * 32) * s.mode.speed;
     if (t.move === 'fan')
         for (let wave = 0; wave < 2; wave++)
@@ -279,6 +371,11 @@ function release(s, t) {
         b.dash = t.length;
         b.heading = t.angle;
     }
+    if (t.kind === 'landing') {
+        e.x = t.x;
+        e.y = t.y;
+        s.hash.moved(e);
+    }
     if (t.kind === 'summon')
         for (let i = 0; i < 3; i++) {
             const a = i / 3 * TAU, x = t.x + Math.cos(a) * t.radius, y = t.y + Math.sin(a) * t.radius;
@@ -288,6 +385,7 @@ function release(s, t) {
                 n.speed = 110;
                 n.damage = e.damage * .45;
                 n.escort = true;
+                n.leader = e.id;
                 n.xp = 6;
             }
         }
@@ -299,6 +397,8 @@ export function updateBossWorld(s, dt) {
     if (!w)
         return;
     const a = w.arena;
+    w.hintTime = Math.max(0, w.hintTime - dt);
+    w.counterTime = Math.max(0, w.counterTime - dt);
     if (a) {
         a.age += dt;
         if (a.release >= 0) {
@@ -319,12 +419,25 @@ export function updateBossWorld(s, dt) {
         }
         if (t.move === 'spiral' && t.age >= t.warning && Math.floor((t.age - t.warning) * 10) > Math.floor(Math.max(-.01, before - t.warning) * 10)) {
             for (let k = 0; k < 3; k++) {
-                const a = t.angle + k * TAU / 3 + (t.age - t.warning) * 3.4;
-                s.fire(t.x, t.y, a, (270 + t.phase * 32) * s.mode.speed, Math.min(t.damage, s.player.maxHp * .24 / ((s.chapter?.damage ?? 1) * s.chaos.incoming)), true, 'pulse', '#ff80a2', 3.4);
+                const a = t.angle + k * TAU / 3 + (t.age - t.warning) * 3.4, bullet = s.fire(t.x, t.y, a, (270 + t.phase * 32) * s.mode.speed, Math.min(t.damage, s.player.maxHp * .24 / ((s.chapter?.damage ?? 1) * s.chaos.incoming)), true, 'pulse', '#ff80a2', 3.4);
+                if (bullet)
+                    bulletOwners.set(bullet, t.owner);
             }
         }
-        if (threatHits(t, s.player.x, s.player.y, s.player.r))
+        if (threatHits(t, s.player.x, s.player.y, s.player.r)) {
+            bossPatternContact(s);
             hurtBoss(s, t.damage, 'boss:' + t.move);
+            if (t.kind === 'grasp' && s.player.dashTime <= 0) {
+                const dx = t.x - s.player.x, dy = t.y - s.player.y, d = Math.hypot(dx, dy) || 1;
+                s.player.x += dx / d * 100 * dt;
+                s.player.y += dy / d * 100 * dt;
+            }
+        }
+        if (t.kind === 'charge' && t.age > t.warning + t.duration) {
+            const e = s.enemies.find(e => e.id === t.owner);
+            if (e)
+                w.threats.push({ ...t, kind: 'ring', x: e.x, y: e.y, angle: t.angle + Math.PI / 2, radius: 70, width: 24, age: 0, warning: bossTell('pulse', t.phase, s.mode.tell), duration: 2.1, released: false, sourceX: e.x, sourceY: e.y });
+        }
         if (t.age > t.warning + t.duration)
             w.threats.splice(i, 1);
     }
@@ -360,6 +473,25 @@ export function bossWarningShapes(s) {
             q.kind = 'ring';
             q.gaps = [t.angle];
             q.gapWidth = 1.1;
+        }
+        if (t.kind === 'grasp') {
+            q.kind = 'claw';
+            q.gapWidth = 1.2;
+        }
+        if (t.kind === 'fragment')
+            q.kind = 'fragment';
+        if (t.kind === 'landing') {
+            q.kind = 'landing';
+            q.color = '#ffbd74';
+        }
+        if (t.kind === 'decoy') {
+            q.kind = 'decoy';
+            q.opacity = .4;
+            q.color = '#91b6d4';
+        }
+        if (t.kind === 'safezone') {
+            q.kind = 'safezone';
+            q.color = '#ffe1a3';
         }
         if (t.kind === 'summon') {
             for (let i = 0; i < 3; i++)

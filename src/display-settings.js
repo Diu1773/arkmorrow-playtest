@@ -1,0 +1,6 @@
+export function applyDisplaySettings(root, settings) {
+    root.style.setProperty('--text-scale', String(settings.textScale));
+    root.style.setProperty('--ui-scale', String(settings.uiScale));
+    root.dataset.colorAssist = settings.colorAssist;
+}
+export function displaySettingsUI(settings) { const ko = settings.lang === 'ko'; return `<label class="setting-row"><span>${ko ? '글자 크기' : 'Text size'}</span><select data-setting="textScale">${[1, 1.15, 1.3].map(n => `<option value="${n}" ${settings.textScale === n ? 'selected' : ''}>${Math.round(n * 100)}%</option>`).join('')}</select></label><label class="setting-row"><span>${ko ? 'UI 배율' : 'UI scale'}</span><select data-setting="uiScale">${[.9, 1, 1.1].map(n => `<option value="${n}" ${settings.uiScale === n ? 'selected' : ''}>${Math.round(n * 100)}%</option>`).join('')}</select></label><label class="setting-row"><span>${ko ? '색각 보조' : 'Color assistance'}</span><select data-setting="colorAssist"><option value="off" ${settings.colorAssist === 'off' ? 'selected' : ''}>${ko ? '끄기' : 'Off'}</option><option value="contrast" ${settings.colorAssist === 'contrast' ? 'selected' : ''}>${ko ? '고대비 · 모양 강조' : 'High contrast and shapes'}</option></select></label>`; }

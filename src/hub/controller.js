@@ -5,17 +5,19 @@ import { deckArt, deckCamera, portraitArt } from './art.js';
 import { overviewArt } from './ark-art.js';
 import { crewPanel, dialogueUI, unlockText } from './ui.js';
 import { DialoguePlayer, pickDialogue, markSeen } from '../dialogue/model.js';
-import { deckDetails, speakers } from '../dialogue/data.js';
+import { deckDetails, speakers, dialogues } from '../dialogue/data.js';
 import { CREW } from '../crew.js';
 import { crewUnlocked } from '../chapters.js';
 import { t } from '../i18n.js';
 export function createDeckController(o) {
     const app = o.app, deck = new DeckState(o.save().crew, hubVariant(location.search)), persist = o.persist, toast = o.toast;
     let storyPlayer = null, panelId = '', returnFlashUntil = 0, crewFlashUntil = 0;
+    let replay = false, panelReturn = null;
     const tr = (key) => t(key, o.save().settings.lang);
     const btn = (act, label, style = '', extra = '') => `<button class="btn ${style}" data-act="${act}" ${extra}>${label}</button>`;
-    function closeDeckPanel() { app.querySelector('#deck-panel')?.remove(); panelId = ''; deck.stop(); o.clearInput(); }
-    function showDeckPanel(id, content) { closeDeckPanel(); panelId = id; app.insertAdjacentHTML('beforeend', `<div id="deck-panel" role="dialog" aria-modal="true"><section class="panel"><button class="btn small deck-close" data-act="hub-close">${tr('close')}</button>${content}</section></div>`); for (const ca of app.querySelectorAll('[data-portrait]')) {
+    function closeDeckPanel() { app.querySelector('#deck-panel')?.remove(); panelId = ''; deck.stop(); o.clearInput(); if (panelReturn?.isConnected)
+        panelReturn.focus(); }
+    function showDeckPanel(id, content) { const entrance = document.activeElement; closeDeckPanel(); panelReturn = entrance; panelId = id; app.insertAdjacentHTML('beforeend', `<div id="deck-panel" role="dialog" aria-modal="true"><section class="panel"><button class="btn small deck-close" data-act="hub-close">${tr('close')}</button>${content}</section></div>`); for (const ca of app.querySelectorAll('[data-portrait]')) {
         if (ca.dataset.sleeping) {
             const c = ca.getContext('2d');
             c.fillStyle = '#233441';
@@ -47,11 +49,18 @@ export function createDeckController(o) {
             if (!storyPlayer)
                 return;
             if (act === 'story-skip' || storyPlayer.next(save.settings.lang)) {
-                save.story = markSeen(save.story, storyPlayer.entry.id);
-                persist();
+                if (!replay) {
+                    save.story = markSeen(save.story, storyPlayer.entry.id);
+                    persist();
+                }
                 storyPlayer = null;
                 app.querySelector('#story-dialogue')?.remove();
-                app.querySelector('#deck-canvas')?.focus();
+                if (replay) {
+                    replay = false;
+                    o.open('archive');
+                }
+                else
+                    app.querySelector('#deck-canvas')?.focus();
             }
             else
                 drawStory();
@@ -59,7 +68,8 @@ export function createDeckController(o) {
         }
         if (act === 'hub-close') {
             closeDeckPanel();
-            app.querySelector('#deck-canvas')?.focus();
+            if (!panelReturn?.isConnected)
+                app.querySelector('#deck-canvas')?.focus();
             return;
         }
         if (act === 'hub-leave-practice') {
@@ -108,8 +118,15 @@ export function createDeckController(o) {
             o.open('shop');
             return;
         }
+        if (act === 'hub-archive') {
+            if (save.rooms.communications.restored) {
+                closeDeckPanel();
+                o.open('archive');
+            }
+            return;
+        }
         if (act === 'hub-records') {
-            showDeckPanel('records', `<h2>${ko ? '기록 벽' : 'Record wall'}</h2><p>${ko ? '출격' : 'Runs'} ${save.runs} / ${ko ? '완료' : 'Clears'} ${save.wins}</p><p>${ko ? '귀환' : 'Returns'} ${save.story.returns} / ${ko ? '보스 처치' : 'Bosses defeated'} ${save.story.bosses}</p><p>${ko ? '커피잔은 분명 두 개였는데.' : 'There used to be two cups.'}</p><div class="record-notes">${deckDetails.slice(0, Math.min(3, save.story.returns + 1)).map((d, i) => `<span>${ko ? '관찰' : 'Observation'} ${i + 1}<br>${ko ? '커피잔' : 'Cups'} ${d.cups}<br>${d.graffiti}</span>`).join('')}</div>`);
+            showDeckPanel('records', `<h2>${ko ? '기록 벽' : 'Record wall'}</h2><p>${ko ? '출격' : 'Runs'} ${save.runs} / ${ko ? '완료' : 'Clears'} ${save.wins}</p><p>${ko ? '귀환' : 'Returns'} ${save.story.returns} / ${ko ? '보스 처치' : 'Bosses defeated'} ${save.story.bosses}</p><p>${ko ? '커피잔은 분명 두 개였는데.' : 'There used to be two cups.'}</p>${save.rooms.communications.restored ? btn('hub-archive', ko ? '대화 기록 다시 읽기' : 'Conversation archive') : ''}<div class="record-notes">${deckDetails.slice(0, Math.min(3, save.story.returns + 1)).map((d, i) => `<span>${ko ? '관찰' : 'Observation'} ${i + 1}<br>${ko ? '커피잔' : 'Cups'} ${d.cups}<br>${d.graffiti}</span>`).join('')}</div>`);
             return;
         }
         if (act === 'hub-practice') {
@@ -120,6 +137,9 @@ export function createDeckController(o) {
     }
     function interact(id) { const save = o.save(); if (CREW.some(c => c.id === id)) {
         showDeckPanel('crew', crewPanel(save));
+        return;
+    } if (id === 'room-communications' && save.rooms.communications.restored) {
+        deckAction('hub-archive');
         return;
     } if (id.startsWith('room-')) {
         deckAction('hub-research');
@@ -142,6 +162,15 @@ export function createDeckController(o) {
         deck.syncRooms(save.rooms, now / 1000, save.settings.reduced);
         const camera = deckCamera(ca, deck);
         deckArt(ca, deck, save.equipment.cleared, save.story.returns, save.settings.reduced ? 0 : now / 1000, save.settings.lang, camera, save.rooms);
+        if (save.scarf) {
+            const c = ca.getContext('2d');
+            c.save();
+            c.setTransform(1, 0, 0, 1, 0, 0);
+            c.fillStyle = '#f09c64';
+            c.fillRect(Math.round(deck.x - camera.x - 8), Math.round(deck.y - camera.y - 15), 16, 4);
+            c.fillRect(Math.round(deck.x - camera.x + 5), Math.round(deck.y - camera.y - 11), 4, 10);
+            c.restore();
+        }
         const overview = app.querySelector('#deck-overview');
         if (overview)
             overviewArt(overview, deck, save.rooms);
@@ -190,8 +219,10 @@ export function createDeckController(o) {
     app.addEventListener('pointerdown', e => { const ca = e.target.closest('#deck-canvas'); if (!ca || !o.active() || storyPlayer || panelId)
         return; e.preventDefault(); const r = ca.getBoundingClientRect(), camera = deckCamera(ca, deck), point = { x: camera.x + (e.clientX - r.left) / r.width * camera.w, y: camera.y + (e.clientY - r.top) / r.height * camera.h }, target = deck.targetAt(point); deck.walkTo(target ?? point, target?.id ?? ''); ca.focus(); });
     return { deck, action: deckAction, paint: paintDeck, closePanel: closeDeckPanel, openStory,
+        replayDialogue(id) { const save = o.save(), entry = dialogues.find(d => d.id === id); if (!save.rooms.communications.restored || !entry || !save.story.seen.includes(id))
+            return; closeDeckPanel(); replay = true; storyPlayer = new DialoguePlayer(entry); drawStory(); },
         get storyPlayer() { return storyPlayer; }, get panelOpen() { return !!panelId; },
-        resetOverlay() { panelId = ''; storyPlayer = null; if (deck.layout && !deck.layout.walkable(deck.x, deck.y))
+        resetOverlay() { panelId = ''; storyPlayer = null; replay = false; if (deck.layout && !deck.layout.walkable(deck.x, deck.y))
             deck.returnToCapsule(); },
         clearFlashes() { returnFlashUntil = crewFlashUntil = 0; },
         returnToCapsule() { deck.returnToCapsule(); returnFlashUntil = performance.now() + 800; } };

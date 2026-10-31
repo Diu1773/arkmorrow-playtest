@@ -96,6 +96,45 @@ function glyph(b, id, frame, tier, direction) {
     }
 }
 function impactArt(b, id, f, variant = 0) {
+    if (!variant && ['pulse', 'orbit', 'fan', 'turret', 'resonance'].includes(id)) {
+        const r = 3 + f * 1.8, c = f < 2 ? 7 : f < 5 ? 23 : 10;
+        if (id === 'pulse') {
+            b.line(-r * 1.6, 0, r * 1.6, 0, c, 3);
+            b.dot(r * 1.6, 0, 7, 3);
+        }
+        else if (id === 'orbit') {
+            for (let j = 0; j < 10; j++) {
+                const a = -1.2 + j * .24 + f * .12;
+                b.dot(Math.cos(a) * r, Math.sin(a) * r, c, 3);
+            }
+        }
+        else if (id === 'fan') {
+            for (let j = 0; j < 3; j++) {
+                const a = (j - 1) * .65;
+                b.line(Math.cos(a) * r * .4, Math.sin(a) * r * .4, Math.cos(a) * r * 1.5, Math.sin(a) * r * 1.5, c, 2);
+            }
+        }
+        else if (id === 'turret') {
+            for (const side of [-1, 1]) {
+                b.line(side * r, -r * .6, side * r, r * .6, c, 2);
+                b.line(side * r, -r * .6, side * (r - 3), -r * .6, c, 2);
+                b.line(side * r, r * .6, side * (r - 3), r * .6, c, 2);
+            }
+            b.dot(0, 0, 7, 2);
+        }
+        else {
+            for (let j = 0; j < 20; j++) {
+                const a = j * Math.PI / 10;
+                b.dot(Math.cos(a) * r, Math.sin(a) * r, c, 2);
+            }
+            if (f < 4)
+                for (let j = 0; j < 12; j++) {
+                    const a = j * Math.PI / 6;
+                    b.dot(Math.cos(a) * (r + 5), Math.sin(a) * (r + 5), 23, 1);
+                }
+        }
+        return;
+    }
     const scale = variant ? 1.6 : 1.25;
     paintEffect({ dot: (x, y, c, w = 1, h = w) => b.dot(x * scale, y * scale, c, Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale))), line: (x, y, ex, ey, c, w = 1) => b.line(x * scale, y * scale, ex * scale, ey * scale, c, w) }, elementOf(id), 'explosion', f);
 }
@@ -437,7 +476,7 @@ export class EffectRenderer {
     }
     field(ctx, e) {
         const p = this.p;
-        if (!this.selected.has(e) || e.kind === 'splitwarn' || e.kind === 'level' || this.scene?.combatFields.some(field => field.id === 'stasis' && field.visual === e) || !this.visible(e.x, e.y, e.radius * p.unit + 40))
+        if (!this.selected.has(e) || e.kind === 'splitwarn' || e.kind === 'level' || this.scene?.combatFields.some(field => (field.id === 'stasis' || field.id === 'reflect') && field.visual === e) || !this.visible(e.x, e.y, e.radius * p.unit + 40))
             return;
         const age = e.life - e.ttl, tier = this.upgraded.get(e.weapon) ?? 0, f = this.frame(age), loop = this.frame(0, true), x = p.X(e.x), y = p.Y(e.y), radius = Math.max(8, Math.round(e.radius * p.unit));
         if (e.kind === 'gravity') {

@@ -6,7 +6,6 @@ import { VoiceManager, soundRule } from './audio-voices.js';
 import { SampleBank } from './audio-samples.js';
 import { MusicStream, musicOption, musicRole } from './audio-music.js';
 import { DEV } from './env.js';
-import { CandidateLibrary } from './audio-candidates.js';
 import { candidateURL } from './audio-assignments.js';
 import { bossTrack, bossOption, skillStages } from './audio-feel.js';
 export class AudioEngine {
@@ -37,7 +36,7 @@ export class AudioEngine {
     lowHealth = false;
     healthWarningAt = 0;
     musicDuckUntil = 0;
-    candidates = DEV ? new CandidateLibrary() : null;
+    candidates = null;
     constructor(settings) { this.settings = settings; this.voices.variantCount = id => this.candidates?.sounds(id).length || VARIANTS; const duration = this.voices.duration; this.voices.duration = (id, variant) => { const stages = skillStages(id); if (stages)
         return Math.max(...stages.map(s => s.at + s.seconds / s.pitch)); const clip = this.candidates?.sounds(id)[variant]; return clip ? clip.end - clip.start : duration(id, variant); }; }
     async applyAssignments(value) { const saved = this.candidates?.assign(value) ?? false; if (this.ctx)
@@ -82,7 +81,7 @@ export class AudioEngine {
                     await this.ready;
             }
         }
-        catch { /* A later gesture can retry suspended playback. */ }
+        catch { }
     }
     update(settings) { this.settings = settings; if (!this.ctx)
         return; const now = this.ctx.currentTime; this.master.gain.setTargetAtTime(settings.volume, now, .025); this.music.gain.setTargetAtTime(settings.music * .65, now, .04); this.sfx.gain.setTargetAtTime(settings.sfx * .75, now, .025); }
@@ -116,7 +115,7 @@ export class AudioEngine {
         this.releaseNode(child); try {
         node.source.stop();
     }
-    catch { /* Finished buffers need no second stop. */ } node.source.disconnect(); node.gain.disconnect(); node.pan.disconnect(); node.filter?.disconnect(); }
+    catch { } node.source.disconnect(); node.gain.disconnect(); node.pan.disconnect(); node.filter?.disconnect(); }
     node(buffer, at, gain, pan, destination, pitch = 1, offset = 0, duration = buffer.duration - offset, lowpass) {
         const ctx = this.ctx, source = ctx.createBufferSource(), level = ctx.createGain(), position = ctx.createStereoPanner();
         source.buffer = buffer;

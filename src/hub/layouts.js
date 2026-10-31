@@ -1,5 +1,6 @@
 import { ROOMS } from '../base-rooms.js';
-export const hubVariant = (search) => { const value = new URLSearchParams(search).get('hub'); return value === '0' || value === 'b' || value === 'c' ? value : 'a'; };
+import { DEV } from '../env.js';
+export const hubVariant = (search) => { const value = null; return value === '0' || value === 'b' || value === 'c' ? value : 'a'; };
 export const hubNames = { a: { ko: '방주 단면도', en: 'Ark cross-section' }, b: { ko: '회전 고리 복도', en: 'Rotating ring' }, c: { ko: '작은 조종실', en: 'Little bridge' } };
 const station = (id, x, y, kind, ko, en) => ({ id, x, y, kind, ko, en });
 const facilities = (points) => [

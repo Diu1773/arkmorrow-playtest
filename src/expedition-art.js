@@ -1,4 +1,4 @@
-import { crewFrame, foeFrame, floorTile } from './field-art.js';
+import { crewFrame, foeFrame, floorTile, structureFrame } from './field-art.js';
 import { LOCAL_ENEMIES } from './chapters.js';
 import { TrialScene } from './scenes.js';
 import { drawScene } from './scene-art.js';
@@ -225,6 +225,24 @@ export function drawProps(c, s, X, Y, u, t) {
         const x = X(o.x) + Math.round(Math.sin(t * 37) * o.shake * 2), y = Y(o.y), r = Math.max(4, Math.round(o.r * u));
         if (x + r < 0 || y + r < 0 || x - r > c.canvas.width || y - r * 3 > c.canvas.height)
             continue;
+        if (o.w !== undefined) {
+            if (!o.broken)
+                c.drawImage(structureFrame(o.kind, s.chapter?.id), X(o.x - o.w / 2), Y(o.y - o.h / 2), Math.ceil(o.w * u), Math.ceil(o.h * u));
+            continue;
+        }
+        if (['barrel', 'cover', 'pad', 'turret', 'station', 'rock', 'cloud', 'launchpad'].includes(o.kind)) {
+            if (!o.broken) {
+                c.drawImage(structureFrame(o.kind, s.chapter?.id), x - r, y - r, r * 2, r * 2);
+                if (o.kind === 'pad' && o.cooldown > 0) {
+                    c.globalAlpha = .65;
+                    disk(c, x, y, r * .75, '#252d3d', .8);
+                    c.globalAlpha = 1;
+                }
+            }
+            else
+                block(c, x - r / 2, y - r / 3, r, 4, '#4f494b');
+            continue;
+        }
         disk(c, x + 3, y + 3, r, '#34354b', .35);
         if (o.broken) {
             block(c, x - r, y - 3, r * 2, 5, '#4f494b');
@@ -273,6 +291,48 @@ export function drawProps(c, s, X, Y, u, t) {
             block(c, x - 3, y - r, 6, 4, '#79534e');
         }
         c.globalAlpha = 1;
+    }
+}
+export function drawMapTerrain(c, s, X, Y, u) {
+    for (const t of s.terrain) {
+        if (!['fuel', 'electric', 'ice', 'mist'].includes(t.kind))
+            continue;
+        const x = X(t.x), y = Y(t.y), r = Math.max(3, Math.round(t.r * u));
+        if (x + r < 0 || y + r < 0 || x - r > c.canvas.width || y - r > c.canvas.height)
+            continue;
+        const lit = (t.litUntil ?? 0) > s.time, color = t.kind === 'fuel' ? (lit ? '#b85d38' : '#72513c') : t.kind === 'ice' ? '#548a9c' : t.kind === 'mist' ? '#57466d' : '#66634a';
+        c.globalAlpha = .6;
+        disk(c, x, y, r, color);
+        c.globalAlpha = 1;
+        for (let i = 0; i < 12; i++) {
+            const a = i * 2.4, rr = r * (.25 + i % 4 * .17), px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+            if (t.kind === 'electric') {
+                block(c, px, py, 2, 6, '#ddcb78');
+                block(c, px - 2, py + 5, 4, 2, '#ddcb78');
+            }
+            else if (t.kind === 'ice') {
+                block(c, px, py, 7, 1, '#a8dce2');
+                block(c, px + 3, py - 3, 1, 7, '#a8dce2');
+            }
+            else if (lit) {
+                block(c, px, py - Math.sin(s.time * 9 + i) * 3, 3, 7, '#e9a35b');
+            }
+            else
+                block(c, px, py, 5, 2, t.kind === 'mist' ? '#9683aa' : '#a98356');
+        }
+    }
+    for (const h of s.hazards) {
+        if (!h.mapKind || h.age >= h.warning)
+            continue;
+        const x = X(h.x), y = Y(h.y), fall = (1 - h.age / h.warning) * 180 * u;
+        if (h.mapKind === 'meteor') {
+            block(c, x - fall * .4, y - fall, 6, 7, '#b6927d');
+            block(c, x - fall * .4 - 4, y - fall - 12, 3, 12, '#dc9c62');
+        }
+        if (h.mapKind === 'lightning' && h.age > h.warning * .65) {
+            block(c, x, y - 28, 2, 16, '#ded39c');
+            block(c, x - 3, y - 13, 7, 2, '#ded39c');
+        }
     }
 }
 export function drawEarthEnemy(c, s, e, x, y, size) {

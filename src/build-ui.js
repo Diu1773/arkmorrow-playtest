@@ -1,19 +1,24 @@
 import { combatText as text, combatLabels, combatCopy } from './combat-copy.js';
-import { skillDef } from './combat-catalog.js';
+import { skillDef, skillStats, skillSlot } from './combat-catalog.js';
 import { passiveApplication } from './combat-ui.js';
 import { ELEMENTS, PASSIVES, WEAPONS } from './data.js';
 import { canFuse, FUSIONS, REACTIONS, reactionReady, weaponsReact } from './combat-rules.js';
 import { rankCopy, signalCopy } from './i18n.js';
 import { RUN_CHESTS, RUN_SKILL_LIMIT, runChestRates } from './economy.js';
 export const weaponName = (id, lang) => text(lang).weaponNames[WEAPONS.findIndex(w => w.id === id)];
+export function skillChange(s, c, lang) {
+    const owned = s.skills.find(slot => slot.id === c.id), beforeSlot = owned ?? skillSlot(c.id), next = { ...beforeSlot, level: Math.min(5, (owned?.level ?? 0) + 1), evolved: c.kind === 'skillEvolve' || beforeSlot.evolved, automatic: s.autoCast };
+    const before = owned ? skillStats({ ...owned, automatic: s.autoCast }, s.attributes) : null, after = skillStats(next, s.attributes), ko = lang === 'ko', number = (n) => String(Number(n.toFixed(2)));
+    return { rank: c.kind === 'skillEvolve' ? '5 → ★' : `${owned?.level ?? 0} → ${next.level}`, gain: [`${ko ? '피해' : 'Damage'} ${before ? number(before.damage * s.power) : '—'} → ${number(after.damage * s.power)}`, `${ko ? '대기' : 'Cooldown'} ${before ? number(before.cooldown) : '—'} → ${number(after.cooldown)}s`, `${ko ? '범위' : 'Range'} ${before ? number(before.radius) : '—'} → ${number(after.radius)}`].join('\n') };
+}
 export function aimBadge(id, lang) {
     const mode = WEAPONS.find(w => w.id === id).aim, d = signalCopy(lang), shape = mode === 'closest' ? '<path d="M4 0h2v3H4zM0 4h3v2H0zM7 4h3v2H7zM4 7h2v3H4zM4 4h2v2H4z"/>' : mode === 'movement' ? '<path d="M4 0h2v2h2v2h2v2H6v4H4V6H0V4h2V2h2z"/>' : '<path d="M2 0h6v2H2zM0 2h2v6H0zM8 2h2v6H8zM2 8h6v2H2z"/>';
     return `<span class="aim-tag" data-aim="${mode}" title="${d.aim}: ${d.aimLabels[mode]}"><svg viewBox="0 0 10 10" width="10" height="10" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges">${shape}</svg> ${d.aimLabels[mode]}</span>`;
 }
 export function choiceDetails(s, c, lang) {
     if (c.kind === 'skill' || c.kind === 'skillEvolve') {
-        const def = skillDef(c.id), slot = s.skills.find(s => s.id === c.id);
-        return `<div class="combo-detail"><small>${combatLabels(lang).skills} ${slot?.level ?? 0}/5 → ${def.evolution}</small><small>${def[lang]}</small></div>`;
+        const def = skillDef(c.id);
+        return `<div class="combo-detail"><small>${def[lang]}</small><small>${combatLabels(lang).evolve}: ${def.evolution}</small></div>`;
     }
     const d = combatCopy(lang), w = WEAPONS.find(w => w.id === (c.kind === 'fusion' ? FUSIONS.find(f => f.id === c.id)?.a : c.id)), p = PASSIVES.find(p => p.id === c.id);
     if (!w && !p)

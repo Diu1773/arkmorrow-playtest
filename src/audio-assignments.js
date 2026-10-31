@@ -15,7 +15,6 @@ export function validClip(value, catalogue, kind) {
 }
 export function resolveAssignments(value, catalogue) {
     const defaults = structuredClone(DEFAULT_ASSIGNMENTS), data = value;
-    // Missing candidates retain their default references so the player can use its bundled fallback.
     for (const [group, ids, kind, max] of [['tracks', TRACKS.map(t => t.id), 'music', 3], ['sounds', ALL_SOUND_IDS, 'sound', 5]]) {
         for (const id of ids) {
             const current = defaults[group][id];

@@ -1,7 +1,8 @@
 import { isBossTrack } from './audio-feel.js';
+import { DEV } from './env.js';
 export const CROSSFADE_SECONDS = 1.5;
 export function musicOption(search = globalThis.location?.search ?? '') {
-    const value = new URLSearchParams(search).get('music');
+    const value = null;
     return value === 'b' || value === 'c' ? value : 'a';
 }
 export const musicRole = (track) => isBossTrack(track) ? 'boss' : track === 'title' || track === 'refuge' ? 'hub' : 'combat';
@@ -123,7 +124,7 @@ export class MusicStream {
                         deck.element.load();
                     } }).catch(() => { });
                 }
-                catch { /* Playback can be retried by the next gesture. */ }
+                catch { }
             }
         }
         for (let i = 0; i < this.decks.length; i++) {

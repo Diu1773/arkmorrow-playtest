@@ -1,3 +1,4 @@
+import { smallestNumber } from './hit-feedback.js';
 import { weaponAim } from './aim.js';
 import { ELEMENTS, LEGACY_WEAPONS } from './data.js';
 import { clamp, weaponStats } from './core.js';
@@ -23,7 +24,7 @@ export function statusHit(sim, e, damage, weapon) {
         sim.reactionCounts[reaction] = (sim.reactionCounts[reaction] ?? 0) + 1;
         const index = REACTIONS.findIndex(r => r.id === reaction), color = ELEMENTS[REACTIONS[index].element].color;
         if (sim.floaters.length >= 24) {
-            const numeric = sim.floaters.findIndex(f => Number.isFinite(Number(f.text)));
+            const numeric = smallestNumber(sim.floaters);
             if (numeric >= 0)
                 sim.floaters.splice(numeric, 1);
         }

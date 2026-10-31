@@ -14,7 +14,7 @@ export function parseStory(raw) {
     }
     return state;
 }
-export function eligible(entry, state, runs) { const c = entry.condition; return !(entry.once && state.seen.includes(entry.id)) && (!c.beforeFirst || runs === 0) && (c.deaths === undefined || state.deaths >= c.deaths) && (c.bosses === undefined || state.bosses >= c.bosses) && (c.runs === undefined || runs >= c.runs) && (c.chapter === undefined || state.chapter >= c.chapter); }
+export function eligible(entry, state, runs) { const c = entry.condition; return !(entry.once && state.seen.includes(entry.id)) && (!c.beforeFirst || !state.seen.includes(entry.id)) && (c.deaths === undefined || state.deaths >= c.deaths) && (c.bosses === undefined || state.bosses >= c.bosses) && (c.runs === undefined || runs >= c.runs) && (c.chapter === undefined || state.chapter >= c.chapter); }
 export function pickDialogue(state, runs, at) { return dialogues.filter(d => d.at === at && eligible(d, state, runs)).sort((a, b) => b.priority - a.priority)[0]; }
 export function markSeen(state, id) { return state.seen.includes(id) ? state : { ...state, seen: [...state.seen, id] }; }
 export class DialoguePlayer {

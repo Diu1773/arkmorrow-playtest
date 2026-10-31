@@ -4,7 +4,6 @@ export const CREW = [
     { id: 'mori', name: 'MORI', intro: '표본은 챙겼다. 도시락은 놓고 왔다.', hp: 75, speed: 200, weapon: 'orbit', weaponName: 'ORBITER', trait: '경험치 20% 추가', color: '#87cf78' },
     { id: 'mew', name: 'MEW', intro: '우주복은 싫고 우주는 좋다.', hp: 60, speed: 265, weapon: 'fan', weaponName: 'SCATTER', trait: '작은 몸으로 적 사이를 통과', color: '#bd82ee' },
 ];
-// Directions are front, left, back and right; upright bodies keep a readable silhouette.
 const bodies = {
     pip: [
         '.....aaaaaa...../....aHHHHHHa..../...aHvvvvvvHa.../...aHvEvvEvHa.../...aHvvvvvvHa.../....aHHHHHHa..../.....aaaaaa...../....WaaWWaaW..../...WWaWWWWaWW.../...WaaWaaWaaW.../...aaWWWWWWaa.../....WWaWWaWW..../....WWaaaaWW....',

@@ -1,3 +1,4 @@
+import { grantStarRewards } from './meta-progression.js';
 import { parseEquipment, slotRecord, SLOTS } from './equipment.js';
 import { migrateEquipment, projectLevels } from './meta-equipment.js';
 import { emptyRooms, ROOMS } from './base-rooms.js';
@@ -57,7 +58,7 @@ export function completeMetaMigration(save, data) {
             next.rooms[r.id] = { restored: value.restored === true, productionAt: num(value.productionAt, 8640000000000000) };
         }
         if (Array.isArray(data.milestones))
-            next.milestones = data.milestones.filter((s) => typeof s === 'string' && /^chapter-(?:[0-7]|village)-gold$/.test(s));
+            next.milestones = data.milestones.filter((s) => typeof s === 'string' && /^(?:chapter-(?:[0-7]|village)-gold|scarf)$/.test(s));
     }
     else {
         const migrated = migrateEquipment(save.equipment), refund = META.reduce((n, m) => n + m.cost * save.meta[m.id] * (save.meta[m.id] + 1) / 2, 0);
@@ -67,7 +68,8 @@ export function completeMetaMigration(save, data) {
         for (const key of [...save.equipment.cleared.map(String), ...save.specialCleared])
             next.records[key] = { stars: 3, clears: { normal: 1 } };
     }
+    next.scarf = next.milestones.includes('scarf') && data.scarf === true;
     next.meta = Object.fromEntries(META.map(m => [m.id, 0]));
-    return next;
+    return grantStarRewards(next);
 }
 export function serializeSave(save) { const { lastMetaLoot: _, ...data } = save; const { gold: __, blueprints: ___, lastLoot: ____, ...equipment } = save.equipment; return JSON.stringify({ ...data, equipment }); }

@@ -5,6 +5,6 @@ export function effectFeedback(sim, event) {
     if ((!strong && !heavy) || sim.time < (nextImpact.get(sim) ?? 0))
         return;
     nextImpact.set(sim, sim.time + (strong ? .18 : .12));
-    sim.hitStop = Math.max(sim.hitStop, strong ? .025 : .012);
+    sim.requestHitStop(strong ? .018 : .006);
     sim.shake = Math.max(sim.shake, strong ? 3 : 1.5);
 }

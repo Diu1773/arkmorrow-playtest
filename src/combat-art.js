@@ -63,8 +63,22 @@ export function drawSkillFields(c, s, view) {
                 c.drawImage(skillSprite('drone'), Math.round(x + Math.cos(a) * 25) - 12, Math.round(y + Math.sin(a) * 15) - 25);
             }
         }
-        else if (field.id === 'reflect')
-            fieldEffects.effect(c, effect('electric', 'ring', Math.max(16, Math.min(240, r * 2)), 1), x, y, t, true);
+        else if (field.id === 'reflect') {
+            const edge = (ax, ay, bx, by) => { const steps = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay)))); c.fillStyle = '#87b6cf'; for (let k = 0; k <= steps; k++)
+                c.fillRect(Math.round(ax + (bx - ax) * k / steps), Math.round(ay + (by - ay) * k / steps), 2, 2); };
+            for (let j = 0; j < 6; j++) {
+                const a = j * Math.PI / 3 + (view.reduced ? 0 : t * .18), cx = x + Math.cos(a) * r * .8, cy = y + Math.sin(a) * r * .8, w = Math.max(5, r * .16), h = Math.max(8, r * .25);
+                edge(cx - w, cy - h, cx + w, cy - h);
+                edge(cx + w, cy - h, cx + w, cy + h * .45);
+                edge(cx + w, cy + h * .45, cx, cy + h);
+                edge(cx, cy + h, cx - w, cy + h * .45);
+                edge(cx - w, cy + h * .45, cx - w, cy - h);
+                c.fillStyle = '#d8edf1';
+                c.fillRect(Math.round(cx - w * .3), Math.round(cy - h * .6), 2, Math.max(3, Math.round(h * .7)));
+                c.fillStyle = '#526a88';
+                c.fillRect(Math.round(cx), Math.round(cy), 2, Math.max(2, Math.round(h * .4)));
+            }
+        }
         else if (field.id === 'stasis') {
             const alpha = c.globalAlpha;
             c.globalAlpha = alpha * .4;

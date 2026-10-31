@@ -62,5 +62,5 @@ export class SampleBank {
             this.failures.set('manifest', String(error));
         }
     }
-    sound(id, variant) { return this.buffers.get(`effects/${id}-${variant}.m4a`); }
+    sound(id, variant) { return this.buffers.get(`effects/${id === 'counter' ? 'evolve' : id}-${variant}.m4a`); }
 }
